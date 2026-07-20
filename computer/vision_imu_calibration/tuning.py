@@ -24,7 +24,7 @@ class RuntimeTuning:
     """
 
     leg_side: LegSide = LegSide.AUTO
-    frame_rotation: FrameRotation = FrameRotation.NONE
+    frame_rotation: FrameRotation = FrameRotation.COUNTERCLOCKWISE_90
     confidence_threshold: float = 0.30
     landmark_smoothing: float = 0.55
     angle_smoothing: float = 0.35

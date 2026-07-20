@@ -48,7 +48,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--no-browser", action="store_true")
-    parser.add_argument("--recording-root", type=Path, default=Path("vision_calibration_recordings"))
+    parser.add_argument("--recording-root", type=Path, default=Path("recordings"))
     parser.add_argument("--imu-port", help="UNO R4 calibration serial port, e.g. COM3")
     parser.add_argument("--imu-baud", type=int, default=IMUCAL_BAUD_RATE)
     parser.add_argument(

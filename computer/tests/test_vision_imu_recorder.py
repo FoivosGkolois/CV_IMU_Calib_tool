@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from zipfile import ZipFile
 
 import numpy as np
 
@@ -38,7 +39,16 @@ class FakeCv2:
         return self.writer
 
 
-def test_annotated_recorder_creates_video_metadata_and_timeline(
+def _zip_text(archive_path: str, member: str) -> str:
+    with ZipFile(archive_path) as archive:
+        return archive.read(member).decode("utf-8")
+
+
+def _zip_json(archive_path: str, member: str) -> dict:
+    return json.loads(_zip_text(archive_path, member))
+
+
+def test_annotated_recorder_finalizes_one_zip_without_loose_trial_folder(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -52,8 +62,8 @@ def test_annotated_recorder_creates_video_metadata_and_timeline(
         preferred_fps=12.5,
         sample={
             "frame_index": 1,
-            "visual_knee_angle_deg": 42.0,
-            "raw_knee_angle_deg": 43.0,
+            "visual_knee_angle_deg": 142.0,
+            "raw_knee_angle_deg": 143.0,
             "pose_confidence": 0.9,
             "tracking_valid": True,
             "tracking_reason": "ok",
@@ -65,14 +75,21 @@ def test_annotated_recorder_creates_video_metadata_and_timeline(
 
     assert status.frame_count == 1
     assert fake_cv2.writer.released
-    assert Path(status.csv_path).is_file()
-    assert Path(status.metadata_path).is_file()
-    metadata = json.loads(Path(status.metadata_path).read_text(encoding="utf-8"))
+    assert Path(status.archive_path).is_file()
+    assert list(tmp_path.glob("*.zip")) == [Path(status.archive_path)]
+    assert not any(path.is_dir() for path in tmp_path.iterdir())
+    with ZipFile(status.archive_path) as archive:
+        names = set(archive.namelist())
+    assert "recording_metadata.json" in names
+    assert "pose_timeline.csv" in names
+    assert all("/" not in name.rstrip("/") for name in names)
+    metadata = _zip_json(status.archive_path, "recording_metadata.json")
     assert metadata["source"] == "camera:0"
     assert metadata["record_fps"] == 12.5
-    timeline = Path(status.csv_path).read_text(encoding="utf-8")
+    assert metadata["archive_layout"] == "files_at_zip_root"
+    timeline = _zip_text(status.archive_path, "pose_timeline.csv")
     assert "visual_knee_angle_deg" in timeline
-    assert "42.0" in timeline
+    assert "142.0" in timeline
 
 
 def test_recorder_resamples_video_to_monotonic_elapsed_time(
@@ -92,8 +109,8 @@ def test_recorder_resamples_video_to_monotonic_elapsed_time(
     frame = np.zeros((120, 160, 3), dtype=np.uint8)
     sample = {
         "frame_index": 1,
-        "visual_knee_angle_deg": 10.0,
-        "raw_knee_angle_deg": 10.0,
+        "visual_knee_angle_deg": 170.0,
+        "raw_knee_angle_deg": 170.0,
         "pose_confidence": 0.8,
         "tracking_valid": True,
         "tracking_reason": "ok",
@@ -109,7 +126,7 @@ def test_recorder_resamples_video_to_monotonic_elapsed_time(
     assert status.frame_count == 2
     assert status.video_frame_count == 10
     assert len(fake_cv2.writer.frames) == 10
-    metadata = json.loads(Path(status.metadata_path).read_text(encoding="utf-8"))
+    metadata = _zip_json(status.archive_path, "recording_metadata.json")
     assert metadata["timing_mode"] == "shared_pc_perf_counter_ns_nearest_sample"
     assert metadata["source_frame_count"] == 2
     assert metadata["video_frame_count"] == 10
@@ -140,8 +157,8 @@ def test_recorder_writes_raw_imu_and_builds_synchronized_timeline(
         sample={
             "host_monotonic_ns": 2_010_000_000,
             "frame_index": 1,
-            "visual_knee_angle_deg": 30.0,
-            "raw_knee_angle_deg": 31.0,
+            "visual_knee_angle_deg": 150.0,
+            "raw_knee_angle_deg": 149.0,
             "pose_confidence": 0.9,
             "tracking_valid": True,
             "tracking_reason": "ok",
@@ -182,9 +199,9 @@ def test_recorder_writes_raw_imu_and_builds_synchronized_timeline(
 
     assert status.imu_sample_count == 1
     assert status.synchronized_row_count == 1
-    assert Path(status.imu_csv_path).is_file()
-    assert Path(status.synchronized_csv_path).is_file()
-    synchronized = Path(status.synchronized_csv_path).read_text(encoding="utf-8")
+    raw_imu = _zip_text(status.archive_path, "raw_imu.csv")
+    synchronized = _zip_text(status.archive_path, "synchronized_timeline.csv")
+    assert "thigh_ax_raw" in raw_imu
     assert "sync_delta_ms" in synchronized
     assert "imu_sample_index" in synchronized
 
@@ -209,7 +226,7 @@ def test_recorder_separates_raw_and_processed_imu_outputs(tmp_path: Path, monkey
         sample={
             "host_monotonic_ns": 3_010_000_000,
             "frame_index": 1,
-            "visual_knee_angle_deg": 25.0,
+            "visual_knee_angle_deg": 155.0,
             "tracking_valid": True,
         },
     )
@@ -238,7 +255,7 @@ def test_recorder_separates_raw_and_processed_imu_outputs(tmp_path: Path, monkey
         sample_index=4,
         mcu_timestamp_us=40_000,
         valid=True,
-        knee_angle_deg=24.0,
+        knee_angle_deg=156.0,
         knee_speed_deg_s=-2.0,
         thigh_angle_deg=0.0,
         shank_angle_deg=24.0,
@@ -248,10 +265,24 @@ def test_recorder_separates_raw_and_processed_imu_outputs(tmp_path: Path, monkey
     clock["now_ns"] = 3_020_000_000
     status = recorder.stop()
     assert status.estimator_sample_count == 1
-    assert Path(status.estimator_csv_path).is_file()
-    assert Path(status.summary_path).is_file()
-    assert Path(status.overview_plot_path).is_file()
-    estimator_text = Path(status.estimator_csv_path).read_text(encoding="utf-8")
+    estimator_text = _zip_text(status.archive_path, "imu_estimator_timeline.csv")
     assert "knee_angle_deg" in estimator_text
-    synchronized = Path(status.synchronized_csv_path).read_text(encoding="utf-8")
+    synchronized = _zip_text(status.archive_path, "synchronized_timeline.csv")
     assert "estimator_knee_angle_deg" in synchronized
+    with ZipFile(status.archive_path) as archive:
+        assert "acquisition_summary.json" in archive.namelist()
+        assert "acquisition_overview.png" in archive.namelist()
+
+
+def test_open_output_location_uses_windows_explorer(tmp_path: Path, monkeypatch) -> None:
+    opened: list[str] = []
+    monkeypatch.setattr("computer.vision_imu_calibration.recorder.sys.platform", "win32")
+    monkeypatch.setattr(
+        "computer.vision_imu_calibration.recorder.os.startfile",
+        lambda path: opened.append(path),
+        raising=False,
+    )
+    recorder = AnnotatedVideoRecorder(tmp_path / "recordings")
+    resolved = recorder.open_output_location()
+    assert opened == [resolved]
+    assert Path(resolved).is_dir()

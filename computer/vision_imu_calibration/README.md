@@ -110,21 +110,26 @@ uno_r4_dual_imu_stream/uno_r4_dual_imu_stream.ino
 
 ## Output contract
 
-Each session creates:
+Each completed session creates exactly one archive:
 
 ```text
-vision_calibration_recordings/vision_imu_session_<timestamp>/
-├── annotated_pose.mp4              # or AVI fallback
-├── pose_timeline.csv               # visual landmarks and visual knee angle
-├── raw_imu.csv                     # raw and unit-converted IMU measurements
-├── imu_estimator_timeline.csv      # current STM32-equivalent filter output at IMU rate
-├── synchronized_timeline.csv       # camera rows paired to raw and processed IMU samples
-├── acquisition_summary.json        # descriptive coverage and synchronization evidence
-├── acquisition_overview.png        # visual and IMU angle presentation
-└── recording_metadata.json
+recordings/vision_imu_session_<timestamp>.zip
 ```
 
-Raw and processed data remain in separate files. `host_monotonic_ns` is generated from `time.perf_counter_ns()` for both streams, while the MCU timestamp is retained for the native 100 Hz IMU timeline.
+The ZIP contains these files directly at its root:
+
+```text
+annotated_pose.mp4              # or AVI fallback
+pose_timeline.csv               # visual landmarks and visual posterior knee angle
+raw_imu.csv                     # raw and unit-converted IMU measurements
+imu_estimator_timeline.csv      # current IMU filter output at IMU rate
+synchronized_timeline.csv       # camera rows paired to raw and processed IMU samples
+acquisition_summary.json        # descriptive coverage and synchronization evidence
+acquisition_overview.png        # visual and IMU angle presentation
+recording_metadata.json
+```
+
+A temporary workspace is used only while recording and is removed after successful ZIP finalization. Raw and processed data remain in separate files. `host_monotonic_ns` is generated from `time.perf_counter_ns()` for both streams, while the MCU timestamp is retained for the native 100 Hz IMU timeline.
 
 ## Calibration protocol
 
@@ -200,13 +205,13 @@ Stop recording before changing profile. The camera briefly restarts, while the M
 
 After **Connect**, the UNO R4 stream runs continuously, even while the recorder is idle. The web page shows:
 
-- current IMU knee flexion,
+- current IMU posterior knee angle,
 - current knee speed,
 - thigh and shank filtered orientations,
 - visual and IMU angle on a rolling 15 s plot,
-- the active parameter source (`settings/current.yaml`).
+- the active standalone parameter source (`default_knee_filter.yaml`).
 
-The **Reload settings/current.yaml** button resets only the host-side estimator and reloads the current STM32 knee-angle parameters. It does not write parameters to the Arduino or production firmware.
+The **Reload IMU filter config** button resets only the host-side estimator and reloads the standalone filter parameters. It does not write parameters to the Arduino.
 
 The host implementation is identified as `stm32_knee_angle_cpp_mirror_v1` and is checked against the current C++ implementation when a desktop C++ compiler is available.
 

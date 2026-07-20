@@ -88,9 +88,9 @@ def test_movenet_estimator_converts_output_to_pose_contract(tmp_path: Path) -> N
     assert pose.timestamp_ms == 1234
     left = pose.leg(LegSide.LEFT)
     assert left is not None
-    assert left.hip.x == pytest.approx(0.45)
+    assert left.hip.x == pytest.approx(0.55)
     assert left.hip.y == pytest.approx(0.48)
-    assert left.knee.x == pytest.approx(0.45)
+    assert left.knee.x == pytest.approx(0.55)
     assert left.ankle.y == pytest.approx(0.88)
     assert left.confidence == pytest.approx(0.9)
     assert created[0].num_threads == 4

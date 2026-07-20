@@ -1,53 +1,80 @@
-Vision-IMU Posterior Angle + Side Swap + Live Arc Patch
+Vision-IMU Responsive UI + ZIP Recorder Patch
 
 BASELINE
-Standalone tool root:
+Standalone tool root only:
 C:\Users\phevo\Desktop\CV_IMU_Calib_tool
 
+Expected previous patch:
+Vision_IMU_Posterior_Angle_Arc_Patch
+
 AFFECTED AREA
-- Visual knee-angle geometry
-- IMU knee-angle presentation convention
-- Left/right leg mapping in the standalone vision tool
-- Live overlay rendering
-- Presentation labels and targeted tests
+- Standalone web GUI layout and responsive behavior
+- Default frame rotation
+- Local recordings-folder opening
+- Recorder output packaging
+- Targeted standalone tests and README
 
-WHAT CHANGES
-1. Both visual and IMU angles now use the same convention:
-   - 180 deg = straight leg
-   - smaller angle = more flexion
-   This is the posterior knee angle (the angle behind the knee).
+MAIN CHANGES
+1. UI layout
+   - Key tracking/angle metrics move below the video.
+   - Recorder and IMU connection stay at the top of the right panel.
+   - Advanced tuning and diagnostics are collapsible.
+   - Controls use compact fixed heights and responsive breakpoints.
+   - Horizontal overflow in the right panel is suppressed.
 
-2. Left/right recognition is swapped to match the user's expected convention.
+2. Default orientation
+   - 90 degrees counter-clockwise is the new default.
 
-3. The live overlay now draws a colored arc at the knee plus a live numeric angle label.
+3. Clickable recording destination
+   - The displayed ZIP path is a button.
+   - Clicking it opens the local recordings folder in Windows Explorer.
 
-4. The live chart and GUI labels now refer to the posterior knee angle.
+4. Output contract
+   - Output root: recordings\
+   - One completed trial creates one file:
+     recordings\vision_imu_session_<timestamp>.zip
+   - Trial files are stored directly at the ZIP root.
+   - The temporary workspace is removed after successful finalization.
+   - No normal loose trial folder remains.
 
 COPY / REPLACE
 Extract this ZIP into:
 C:\Users\phevo\Desktop\CV_IMU_Calib_tool
 
 Keep the folder structure and replace the matching files.
-No file is deleted.
+No source file is deleted.
+The old vision_calibration_recordings folder is not moved or deleted automatically.
 
 RUN
 1. 10_TEST_VISION_IMU_PC.bat
 2. 11_RUN_VISION_IMU_SYNC_PC.bat
 
-WHAT TO CHECK ON SCREEN
-- Straight leg should read close to 180 deg.
-- As the knee bends, the displayed angle should decrease.
-- Left/Right labels should now match your expectation.
-- A green arc should appear around the knee with the live angle value.
+EXPECTED
+- Fresh launch defaults to 90 degrees counter-clockwise.
+- The right panel remains compact at increased browser zoom.
+- Clicking the displayed path opens the recordings folder.
+- Stop shows ZIP finalization and ends with one .zip inside recordings.
+- Opening the ZIP shows CSV/JSON/PNG/video files directly, without a containing session folder.
 
-VALIDATION RUN
-- python -m compileall computer/vision_imu_calibration : PASS
-- pytest computer/tests/test_vision_imu_geometry.py computer/tests/test_vision_imu_filter.py computer/tests/test_vision_imu_filter_cpp_parity.py computer/tests/test_vision_imu_presentation.py : 18 passed
-- pytest computer/tests/test_vision_imu_runtime.py computer/tests/test_vision_imu_web_app.py : 11 passed, 1 skipped
+FAILURE BEHAVIOR
+If ZIP finalization fails, the recorder reports the temporary recovery path instead of deleting the only copy of the trial.
 
-MAIN RISK
-The left/right correction is now encoded at the pose-contract level for this standalone tool.
-If you later change camera orientation or move to a different convention, this specific swap point must be reviewed during integration.
+VALIDATION
+- Python compileall: PASS
+- Full computer test suite: 232 passed, 1 skipped
+- ZIP finalization, direct-root archive layout, and folder opener: automated tests PASS
+
+REMAINING HARDWARE / WINDOWS CHECKS
+- Visual inspection at 100%, 125%, and 150% browser zoom
+- Windows Explorer opens from the clickable path
+- Real camera + UNO R4 trial produces one valid ZIP
+- Long-trial ZIP finalization time is acceptable
+
+UNCHANGED
+- Arduino sketch and IMUCAL serial protocol
+- Raw IMU fields and timestamps
+- Visual/IMU posterior-angle convention
+- Filter calculations and synchronization schema
 
 GIT COMMIT TITLE
-Align Vision-IMU tool to posterior knee-angle convention
+Improve Vision-IMU UI and finalize trials as ZIP archives

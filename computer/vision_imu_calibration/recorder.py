@@ -2,8 +2,14 @@ from __future__ import annotations
 
 import csv
 import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
 import threading
 import time
+import zipfile
 from dataclasses import asdict, dataclass, is_dataclass
 from datetime import datetime
 from pathlib import Path
@@ -17,6 +23,8 @@ from .synchronization import build_synchronized_timeline
 class RecordingStatus:
     active: bool
     path: str
+    archive_path: str
+    output_root: str
     metadata_path: str
     csv_path: str
     imu_csv_path: str
@@ -106,12 +114,15 @@ class AnnotatedVideoRecorder:
         "filter_reason",
     ]
 
-    def __init__(self, output_root: str | Path = "vision_calibration_recordings") -> None:
+    def __init__(self, output_root: str | Path = "recordings") -> None:
         self.output_root = Path(output_root)
         self._lock = threading.RLock()
         self._requested = False
         self._writer: Any | None = None
         self._session_dir: Path | None = None
+        self._session_name = ""
+        self._archive_path: Path | None = None
+        self._archive_finalized = False
         self._video_path: Path | None = None
         self._csv_path: Path | None = None
         self._imu_csv_path: Path | None = None
@@ -216,6 +227,21 @@ class AnnotatedVideoRecorder:
         with self._lock:
             return self._status_locked()
 
+    def open_output_location(self) -> str:
+        """Open the recorder output folder on the local desktop OS."""
+        output_root = self.output_root.expanduser().resolve()
+        output_root.mkdir(parents=True, exist_ok=True)
+        if sys.platform.startswith("win"):
+            startfile = getattr(os, "startfile", None)
+            if startfile is None:
+                raise RuntimeError("Windows folder opening is unavailable in this Python runtime")
+            startfile(str(output_root))
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", str(output_root)])
+        else:
+            subprocess.Popen(["xdg-open", str(output_root)])
+        return str(output_root)
+
     def close(self) -> None:
         with self._lock:
             self._requested = False
@@ -224,6 +250,9 @@ class AnnotatedVideoRecorder:
     def _reset_session_state_locked(self) -> None:
         self._error = ""
         self._session_dir = None
+        self._session_name = ""
+        self._archive_path = None
+        self._archive_finalized = False
         self._video_path = None
         self._csv_path = None
         self._imu_csv_path = None
@@ -244,13 +273,20 @@ class AnnotatedVideoRecorder:
         self._record_fps = 0.0
 
     def _create_session_locked(self) -> None:
+        self.output_root.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        session_dir = self.output_root / f"vision_imu_session_{timestamp}"
+        session_name = f"vision_imu_session_{timestamp}"
+        archive_path = self.output_root / f"{session_name}.zip"
         suffix = 1
-        while session_dir.exists():
-            session_dir = self.output_root / f"vision_imu_session_{timestamp}_{suffix:02d}"
+        while archive_path.exists():
+            session_name = f"vision_imu_session_{timestamp}_{suffix:02d}"
+            archive_path = self.output_root / f"{session_name}.zip"
             suffix += 1
-        session_dir.mkdir(parents=True, exist_ok=False)
+
+        session_dir = Path(tempfile.mkdtemp(prefix=f"{session_name}_"))
+        self._session_name = session_name
+        self._archive_path = archive_path
+        self._archive_finalized = False
         self._session_dir = session_dir
         self._csv_path = session_dir / "pose_timeline.csv"
         self._imu_csv_path = session_dir / "raw_imu.csv"
@@ -276,6 +312,8 @@ class AnnotatedVideoRecorder:
             "created_at": datetime.now().astimezone().isoformat(),
             "source": self._source,
             "imu_source": self._imu_source,
+            "archive_file": self._archive_path.name,
+            "archive_layout": "files_at_zip_root",
             "video_file": "",
             "timeline_file": self._csv_path.name,
             "raw_imu_file": self._imu_csv_path.name,
@@ -332,6 +370,8 @@ class AnnotatedVideoRecorder:
             self._video_frame_count += 1
 
     def _close_locked(self) -> None:
+        if self._archive_finalized:
+            return
         if self._started_monotonic_ns is not None:
             self._final_elapsed_s = max(
                 0.0, (time.perf_counter_ns() - self._started_monotonic_ns) / 1_000_000_000.0
@@ -385,6 +425,43 @@ class AnnotatedVideoRecorder:
             )
             self._write_metadata_locked()
 
+        try:
+            self._finalize_archive_locked()
+        except Exception as exc:
+            staging = str(self._session_dir or "")
+            self._error = self._error or f"ZIP finalization failed: {exc}. Recovery files: {staging}"
+
+    def _finalize_archive_locked(self) -> None:
+        if self._archive_finalized or self._session_dir is None or self._archive_path is None:
+            return
+        if not self._session_dir.is_dir():
+            raise RuntimeError(f"Recording staging directory is missing: {self._session_dir}")
+
+        self.output_root.mkdir(parents=True, exist_ok=True)
+        temporary_archive = self._archive_path.with_suffix(".zip.partial")
+        temporary_archive.unlink(missing_ok=True)
+        try:
+            with zipfile.ZipFile(temporary_archive, "w") as archive:
+                for source in sorted(self._session_dir.rglob("*")):
+                    if not source.is_file():
+                        continue
+                    compression = (
+                        zipfile.ZIP_STORED
+                        if source.suffix.lower() in {".mp4", ".avi"}
+                        else zipfile.ZIP_DEFLATED
+                    )
+                    archive.write(
+                        source,
+                        arcname=source.relative_to(self._session_dir).as_posix(),
+                        compress_type=compression,
+                    )
+            os.replace(temporary_archive, self._archive_path)
+        finally:
+            temporary_archive.unlink(missing_ok=True)
+
+        shutil.rmtree(self._session_dir)
+        self._archive_finalized = True
+
     def _write_metadata_locked(self) -> None:
         if self._metadata_path is not None:
             self._metadata_path.write_text(json.dumps(self._metadata, indent=2), encoding="utf-8")
@@ -396,16 +473,20 @@ class AnnotatedVideoRecorder:
             if self._started_monotonic_ns is not None and active
             else self._final_elapsed_s
         )
+        archive_path = str(self._archive_path.resolve()) if self._archive_path is not None else ""
+        output_root = str(self.output_root.expanduser().resolve())
         return RecordingStatus(
             active=active,
-            path=str(self._video_path or self._session_dir or ""),
-            metadata_path=str(self._metadata_path or ""),
-            csv_path=str(self._csv_path or ""),
-            imu_csv_path=str(self._imu_csv_path or ""),
-            estimator_csv_path=str(self._estimator_csv_path or ""),
-            synchronized_csv_path=str(self._synchronized_csv_path or ""),
-            summary_path=str(self._summary_path or ""),
-            overview_plot_path=str(self._overview_plot_path or ""),
+            path=archive_path,
+            archive_path=archive_path,
+            output_root=output_root,
+            metadata_path=self._reported_member_path(self._metadata_path),
+            csv_path=self._reported_member_path(self._csv_path),
+            imu_csv_path=self._reported_member_path(self._imu_csv_path),
+            estimator_csv_path=self._reported_member_path(self._estimator_csv_path),
+            synchronized_csv_path=self._reported_member_path(self._synchronized_csv_path),
+            summary_path=self._reported_member_path(self._summary_path),
+            overview_plot_path=self._reported_member_path(self._overview_plot_path),
             elapsed_s=elapsed,
             frame_count=self._frame_count,
             video_frame_count=self._video_frame_count,
@@ -414,6 +495,13 @@ class AnnotatedVideoRecorder:
             synchronized_row_count=self._synchronized_row_count,
             error=self._error,
         )
+
+    def _reported_member_path(self, path: Path | None) -> str:
+        if path is None:
+            return ""
+        if self._archive_finalized and self._archive_path is not None:
+            return f"{self._archive_path.resolve()}::{path.name}"
+        return str(path)
 
 
 def _to_record(value: Any) -> dict[str, Any]:

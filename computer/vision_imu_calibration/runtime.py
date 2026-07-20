@@ -80,7 +80,7 @@ class VisionRuntime:
         *,
         leg_side: LegSide = LegSide.AUTO,
         confidence_threshold: float = 0.30,
-        recording_root: str | Path = "vision_calibration_recordings",
+        recording_root: str | Path = "recordings",
         imu_source: SerialImuSource | None = None,
         imu_source_factory: Any = SerialImuSource,
         imu_filter: KneeAngleFilterMirror | None = None,
@@ -462,6 +462,9 @@ class VisionRuntime:
 
     def stop_recording(self) -> dict[str, Any]:
         return asdict(self.recorder.stop())
+
+    def open_recordings_location(self) -> dict[str, str]:
+        return {"path": self.recorder.open_output_location()}
 
     def wait_for_jpeg(self, after_sequence: int, timeout_s: float = 1.0) -> tuple[int, bytes | None]:
         deadline = time.monotonic() + max(0.0, float(timeout_s))

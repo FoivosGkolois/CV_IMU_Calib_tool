@@ -42,6 +42,9 @@ class FakeRuntime:
     def stop_recording(self):
         return {"active": False}
 
+    def open_recordings_location(self):
+        return {"path": "C:/tool/recordings"}
+
     def wait_for_jpeg(self, after_sequence: int, timeout_s: float = 1.0):
         return after_sequence, None
 
@@ -69,6 +72,10 @@ def test_manual_imu_and_camera_profile_endpoints() -> None:
     disconnected = client.post("/api/imu/disconnect")
     assert disconnected.status_code == 200
     assert runtime.connected is None
+
+    opened = client.post("/api/recordings/open")
+    assert opened.status_code == 200
+    assert opened.get_json()["path"].endswith("recordings")
 
 
 def test_filter_reload_and_history_endpoints() -> None:

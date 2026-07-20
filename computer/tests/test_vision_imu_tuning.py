@@ -49,3 +49,9 @@ def test_runtime_tuning_partial_update_preserves_other_values() -> None:
 def test_runtime_tuning_rejects_invalid_values(field: str, value: object) -> None:
     with pytest.raises(ValueError):
         RuntimeTuning.from_mapping({field: value})
+
+
+def test_default_frame_rotation_matches_portrait_mounting() -> None:
+    from computer.vision_imu_calibration.tuning import FrameRotation, RuntimeTuning
+
+    assert RuntimeTuning().frame_rotation is FrameRotation.COUNTERCLOCKWISE_90
