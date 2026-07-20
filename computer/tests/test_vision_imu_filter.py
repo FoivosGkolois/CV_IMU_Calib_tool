@@ -7,6 +7,7 @@ import pytest
 from computer.vision_imu_calibration.imu_filter import (
     KneeAngleFilterMirror,
     KneeAngleFilterParameters,
+    resolve_filter_config_path,
 )
 from computer.vision_imu_calibration.imu_serial import (
     ACCEL_G_PER_LSB,
@@ -51,13 +52,26 @@ def sample(
 
 
 def test_loads_current_stm32_knee_angle_parameters() -> None:
-    path = Path(__file__).resolve().parents[2] / "settings" / "current.yaml"
+    root = Path(__file__).resolve().parents[2]
+    path = resolve_filter_config_path(working_directory=root)
     params = KneeAngleFilterParameters.load_yaml(path)
     assert params.rotation_axis == 0
     assert params.gyro_rate_sign == pytest.approx(1.0)
     assert params.acc_axis_1_sign == pytest.approx(-1.0)
     assert params.alpha_stable == pytest.approx(0.9)
     assert params.alpha_dynamic == pytest.approx(0.975)
+
+
+def test_standalone_config_falls_back_to_bundled_snapshot(tmp_path: Path) -> None:
+    path = resolve_filter_config_path(working_directory=tmp_path)
+    params = KneeAngleFilterParameters.load_yaml(path)
+    assert path.name == "default_knee_filter.yaml"
+    assert params.alpha_dynamic == pytest.approx(0.975)
+
+
+def test_explicit_missing_config_is_rejected(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError):
+        resolve_filter_config_path(tmp_path / "missing.yaml")
 
 
 def test_static_straight_pose_returns_zero_flexion() -> None:

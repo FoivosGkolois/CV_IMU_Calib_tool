@@ -1,0 +1,25 @@
+# Bundled standalone snapshot of the current STM32 knee-angle parameters.
+# Source baseline: Thesis_master(40), branch master_2, commit f738a96.
+# In a full thesis checkout, settings/current.yaml is preferred automatically.
+schema_version: vision_imu_knee_filter_snapshot_v1
+source_baseline:
+  branch: master_2
+  commit: f738a96
+stm32_control:
+  knee_angle:
+    rotation_axis: x
+    gyro_rate_sign: 1.0
+    acc_axis_1_sign: -1.0
+    acc_axis_2_sign: 1.0
+    thigh_offset_deg: 0.0
+    shank_offset_deg: 0.0
+    relative_angle_sign: 1.0
+    straight_leg_offset_deg: 0.0
+    gyro_deadband_deg_s: 1.0
+    thigh_gyro_bias_deg_s: 0.0
+    shank_gyro_bias_deg_s: 0.0
+    alpha_stable: 0.9
+    alpha_dynamic: 0.975
+    acc_full_trust_deviation_g: 0.06
+    acc_no_trust_deviation_g: 0.3
+    max_accel_correction_deg: 10.0

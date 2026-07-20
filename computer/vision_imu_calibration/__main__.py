@@ -9,7 +9,11 @@ from pathlib import Path
 
 from .camera_source import OpenCvCameraSource
 from .download_model import DEFAULT_TARGET, download_model
-from .imu_filter import KneeAngleFilterMirror, KneeAngleFilterParameters
+from .imu_filter import (
+    KneeAngleFilterMirror,
+    KneeAngleFilterParameters,
+    resolve_filter_config_path,
+)
 from .imu_serial import IMUCAL_BAUD_RATE, SerialImuSource
 from .models import LegSide
 from .pose_estimator import MoveNetThunderPoseEstimator
@@ -50,8 +54,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--filter-config",
         type=Path,
-        default=Path("settings/current.yaml"),
-        help="Runtime YAML containing stm32_control.knee_angle parameters",
+        default=None,
+        help=(
+            "Optional runtime YAML containing stm32_control.knee_angle parameters. "
+            "Without this option, settings/current.yaml is preferred and the bundled "
+            "Thesis_master(40) snapshot is used in a standalone tool folder."
+        ),
     )
     return parser
 
@@ -86,7 +94,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.imu_port
         else None
     )
-    filter_config_path = args.filter_config.expanduser().resolve()
+    filter_config_path = resolve_filter_config_path(args.filter_config)
     filter_parameters = KneeAngleFilterParameters.load_yaml(filter_config_path)
     imu_filter = KneeAngleFilterMirror(filter_parameters)
     runtime = VisionRuntime(

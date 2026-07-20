@@ -24,6 +24,8 @@ def test_python_filter_matches_current_cpp_implementation(tmp_path: Path) -> Non
 
     root = Path(__file__).resolve().parents[2]
     src = root / "device" / "stm32_firmware" / "libraries" / "ExoStm32Core" / "src"
+    if not (src / "knee_angle.cpp").is_file() or not (src / "knee_angle.h").is_file():
+        pytest.skip("STM32 source tree is unavailable in this standalone calibration-tool copy")
     (tmp_path / "Arduino.h").write_text(
         "#pragma once\n#include <cstdint>\n#include <cstddef>\n#define A0 0\n#define A1 1\n#define A2 2\n#define A3 3\nusing std::uint8_t; using std::int8_t; using std::uint16_t; using std::int16_t; using std::uint32_t; class Stream {};\n",
         encoding="utf-8",

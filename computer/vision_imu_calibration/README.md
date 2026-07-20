@@ -213,3 +213,16 @@ The host implementation is identified as `stm32_knee_angle_cpp_mirror_v1` and is
 ## Scope boundary
 
 This stage performs acquisition, deterministic filtering, synchronization, recording, and presentation only. It does not search candidate parameters, calculate an optimization score, or generate a recommendation YAML.
+
+## Standalone calibration-tool copy
+
+The acquisition/presentation tool can run outside the complete thesis repository.
+At startup it resolves the knee-angle filter configuration in this order:
+
+1. an explicit `--filter-config <path>` argument,
+2. `settings/current.yaml` when the complete thesis tree is present,
+3. the bundled `default_knee_filter.yaml` snapshot from `Thesis_master(40)`.
+
+The active path is printed in the console and stored with the acquisition metadata.
+The C++ parity test runs only when the STM32 source tree is available. Plot export uses
+the non-interactive Matplotlib `Agg` backend and does not require Tk/Tkinter.

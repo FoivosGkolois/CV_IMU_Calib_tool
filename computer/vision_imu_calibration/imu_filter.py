@@ -10,6 +10,38 @@ from .imu_serial import ImuCalibrationSample
 SAMPLE_PERIOD_S = 0.01
 MIN_VALID_DT_S = 0.001
 MAX_VALID_DT_S = 0.250
+DEFAULT_BUNDLED_FILTER_CONFIG = Path(__file__).with_name("default_knee_filter.yaml")
+
+
+def resolve_filter_config_path(
+    explicit_path: str | Path | None = None,
+    *,
+    working_directory: str | Path | None = None,
+) -> Path:
+    """Resolve the active filter configuration for full-repo or standalone use.
+
+    An explicitly provided path is strict. Without one, a full thesis checkout
+    uses ``settings/current.yaml``; a standalone calibration-tool copy falls
+    back to the bundled, versioned snapshot.
+    """
+
+    if explicit_path is not None:
+        candidate = Path(explicit_path).expanduser().resolve()
+        if not candidate.is_file():
+            raise FileNotFoundError(f"Knee-angle filter config not found: {candidate}")
+        return candidate
+
+    base = Path(working_directory) if working_directory is not None else Path.cwd()
+    thesis_candidate = (base / "settings" / "current.yaml").expanduser().resolve()
+    if thesis_candidate.is_file():
+        return thesis_candidate
+
+    bundled = DEFAULT_BUNDLED_FILTER_CONFIG.resolve()
+    if not bundled.is_file():
+        raise FileNotFoundError(
+            "No settings/current.yaml and no bundled knee-angle filter snapshot were found"
+        )
+    return bundled
 
 
 @dataclass(frozen=True)

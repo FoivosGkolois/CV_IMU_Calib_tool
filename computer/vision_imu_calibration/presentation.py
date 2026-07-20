@@ -108,6 +108,9 @@ def _write_overview_plot(rows: list[dict[str, str]], path: Path) -> None:
     if not rows:
         return
     try:
+        import matplotlib
+
+        matplotlib.use("Agg", force=True)
         import matplotlib.pyplot as plt
     except ImportError:
         return

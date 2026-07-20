@@ -1,87 +1,47 @@
-Vision-IMU — Complete acquisition and presentation stage patch
+Vision-IMU — Standalone runtime/test fix
 
-BASELINE
-Thesis_master(40), branch master_2, HEAD f738a96, with the previously delivered
-Vision-IMU patches applied through:
-- Dual-IMU synchronized capture
-- Fast webcam initialization
-- Manual COM connection and camera quality profiles
-
-OBJECTIVE
-Complete every deterministic stage before the future parameter-analysis layer:
-raw acquisition, current-filter estimation, synchronization, recording, live
-presentation, and descriptive evidence export.
+ROOT CAUSE
+The calibration tool was being run from a standalone folder rather than the
+complete Thesis_master tree. Three repo-only assumptions remained:
+1. settings/current.yaml had to exist,
+2. STM32 knee_angle.cpp/.h had to exist for the parity test,
+3. Matplotlib tried to open the Tk GUI backend.
 
 AFFECTED AREA
-- PC Vision-IMU calibration application only
-- Host-side mirror of the current STM32 knee-angle estimator
-- Trial recording, synchronization, presentation, and tests
+- Knee-filter configuration resolution
+- Headless acquisition plot export
+- Standalone/full-repository test behavior
 
-UNCHANGED
-- Standalone UNO R4 IMUCAL sketch and frame schema
-- Production STM32 firmware
-- Production TELEM and serial GUI parser
-- Motor, SimpleFOC, safety, assistance, and control paths
-- No parameter search, score, optimization, or recommendation YAML
+BEHAVIOR AFTER PATCH
+- Explicit --filter-config remains strict.
+- Without --filter-config:
+  1. settings/current.yaml is preferred when present,
+  2. otherwise the bundled Thesis_master(40) parameter snapshot is used.
+- The active configuration path is still displayed and recorded.
+- C++ parity test runs in the full thesis tree and is skipped in a standalone copy.
+- Plot generation uses Matplotlib Agg and does not require Tk/Tkinter.
 
 COPY / REPLACE
-Extract this ZIP into the current Thesis_master root.
-Keep the folder structure and replace matching files.
+Extract this ZIP into:
+C:\Users\phevo\Desktop\CV_IMU_Calib_tool
+
+Keep the folder structure and replace the matching files.
 No file is deleted.
 
-REQUIRED RUN ORDER
-1. Run 08_SETUP_VISION_IMU_PC.bat once again.
-   This adds PyYAML and Matplotlib to the isolated .venv-vision environment.
-2. Run 10_TEST_VISION_IMU_PC.bat.
-3. Upload the existing standalone UNO R4 sketch:
-   standalone_tools/vision_imu_calibration/arduino/uno_r4_dual_imu_stream/uno_r4_dual_imu_stream.ino
-4. Close Arduino Serial Monitor.
-5. Run 11_RUN_VISION_IMU_SYNC_PC.bat.
-6. In the web page:
-   - press Refresh under UNO R4 raw IMU stream,
-   - select the UNO R4 COM port,
-   - press Connect,
-   - wait for CONNECTED, both sensors READY, and IMU estimator VALID.
-7. Select the camera-near leg explicitly.
-8. Record 5 seconds stationary plus five slow flexion-extension cycles.
-9. Press Stop and inspect the generated session folder.
+RUN
+1. 10_TEST_VISION_IMU_PC.bat
+   Expected in the standalone tool:
+   69 passed, 1 skipped
 
-NEW LIVE PRESENTATION
-- Current visual knee flexion
-- Current STM32-equivalent IMU knee flexion
-- Current IMU knee speed
-- Filtered thigh and shank orientations
-- Visual minus IMU instantaneous difference
-- Rolling 15-second visual/IMU plot
-- Active estimator parameters loaded from settings/current.yaml
-- Reload button for settings/current.yaml while idle
+2. 11_RUN_VISION_IMU_SYNC_PC.bat
 
-NEW TRIAL OUTPUTS
-vision_calibration_recordings/vision_imu_session_<timestamp>/
-- annotated_pose.mp4 or .avi
-- pose_timeline.csv
-- raw_imu.csv
-- imu_estimator_timeline.csv
-- synchronized_timeline.csv
-- acquisition_summary.json
-- acquisition_overview.png
-- recording_metadata.json
+EXPECTED STARTUP
+The console should print an IMU filter config path ending in:
+computer\vision_imu_calibration\default_knee_filter.yaml
 
-SCOPE BOUNDARY
-The patch presents and records the current filter output. It does not decide
-whether one parameter set is better, compute an optimization score, search
-candidate values, or generate recommendations.
-
-HARDWARE ACCEPTANCE
-- both IMUs READY
-- approximately 100 Hz IMU stream
-- estimator VALID after connection
-- parse errors = 0
-- queue drops = 0
-- no unexplained sample-index gaps
-- visual tracking valid during controlled side-view motion
-- synchronized_timeline.csv contains raw and processed IMU fields
-- acquisition_overview.png is generated after Stop
+When the same tool is run from a complete Thesis_master checkout, it should
+instead use:
+settings\current.yaml
 
 GIT COMMIT TITLE
-Complete Vision-IMU acquisition and presentation stage
+Make Vision-IMU acquisition tool standalone-safe
