@@ -30,8 +30,14 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Disable MoveNet video crop tracking and process the full padded frame every time",
     )
-    parser.add_argument("--width", type=int, default=1280)
-    parser.add_argument("--height", type=int, default=720)
+    parser.add_argument("--width", type=int, default=640)
+    parser.add_argument("--height", type=int, default=480)
+    parser.add_argument(
+        "--camera-backend",
+        choices=("auto", "dshow", "msmf", "default"),
+        default="auto",
+        help="Windows camera backend. Auto prefers DSHOW for faster startup.",
+    )
     parser.add_argument("--fps", type=float, default=30.0)
     parser.add_argument("--no-mirror", action="store_true")
     parser.add_argument("--host", default="127.0.0.1")
@@ -61,6 +67,7 @@ def main(argv: list[str] | None = None) -> int:
         height=args.height,
         fps=args.fps,
         mirror=not args.no_mirror,
+        backend=args.camera_backend,
     )
     estimator = MoveNetThunderPoseEstimator(
         model_path,

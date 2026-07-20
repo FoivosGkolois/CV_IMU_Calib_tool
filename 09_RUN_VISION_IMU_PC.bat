@@ -12,12 +12,13 @@ if not exist "%VISION_PYTHON%" (
 
 echo Starting Vision-IMU MoveNet Thunder prototype...
 echo Camera index: 0
+echo Camera mode: 640x480 at 30 FPS, fast Windows backend selection
 echo URL: http://127.0.0.1:8765
 echo After the page opens, select the camera-near leg explicitly.
 echo Stop the application with Ctrl+C.
 echo.
 
-"%VISION_PYTHON%" -m computer.vision_imu_calibration --camera 0 --leg auto --inference-threads 4
+"%VISION_PYTHON%" -m computer.vision_imu_calibration --camera 0 --camera-backend auto --width 640 --height 480 --leg auto --inference-threads 4
 set "APP_EXIT_CODE=%ERRORLEVEL%"
 
 echo.

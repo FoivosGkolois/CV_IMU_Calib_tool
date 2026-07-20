@@ -20,11 +20,12 @@ if "%IMU_PORT%"=="" (
 
 echo Starting synchronized Vision-IMU recorder...
 echo Camera index: 0
+echo Camera mode: 640x480 at 30 FPS, fast Windows backend selection
 echo UNO R4 IMU port: %IMU_PORT%
 echo URL: http://127.0.0.1:8765
 echo.
 
-"%VISION_PYTHON%" -m computer.vision_imu_calibration --camera 0 --leg auto --inference-threads 4 --imu-port "%IMU_PORT%"
+"%VISION_PYTHON%" -m computer.vision_imu_calibration --camera 0 --camera-backend auto --width 640 --height 480 --leg auto --inference-threads 4 --imu-port "%IMU_PORT%"
 set "APP_EXIT_CODE=%ERRORLEVEL%"
 
 echo.

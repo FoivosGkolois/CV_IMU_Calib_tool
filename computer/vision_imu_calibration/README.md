@@ -53,6 +53,27 @@ From the project root:
 
 The isolated `.venv-vision` installs MoveNet/LiteRT, OpenCV, Flask, pytest, and pyserial.
 
+## Fast webcam startup
+
+The default Windows camera profile is intentionally lightweight:
+
+```text
+640 × 480 @ 30 FPS
+auto backend order: DSHOW → MSMF → OpenCV default
+```
+
+MoveNet resizes its input to `256 × 256`, so starting the webcam at 1280 × 720
+does not materially improve pose inference but often increases USB camera negotiation time.
+The active backend is shown in the runtime source field, for example `camera:0 [DSHOW]`.
+
+For a known camera/backend, startup can be made fully deterministic:
+
+```bat
+.venv-vision\Scripts\python.exe -m computer.vision_imu_calibration --camera 0 --camera-backend dshow
+```
+
+Fallback values are `msmf`, `default`, and `auto`.
+
 ## Vision-only run
 
 ```bat

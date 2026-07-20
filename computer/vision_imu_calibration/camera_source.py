@@ -14,10 +14,11 @@ class OpenCvCameraSource:
         *,
         camera_index: int | None = 0,
         video_path: str | Path | None = None,
-        width: int = 1280,
-        height: int = 720,
+        width: int = 640,
+        height: int = 480,
         fps: float = 30.0,
         mirror: bool = True,
+        backend: str = "auto",
         cv2_module: Any | None = None,
         platform_name: str | None = None,
     ) -> None:
@@ -29,6 +30,7 @@ class OpenCvCameraSource:
         self.height = int(height)
         self.fps = float(fps)
         self.mirror = bool(mirror)
+        self.backend = self._normalize_backend(backend)
         self._cv2 = cv2_module
         self._platform_name = platform_name or platform.system()
         self._capture: Any | None = None
@@ -113,13 +115,41 @@ class OpenCvCameraSource:
         if self._platform_name != "Windows":
             return [("DEFAULT", None)]
 
-        candidates: list[tuple[str, int | None]] = []
-        for name, attribute in (("MSMF", "CAP_MSMF"), ("DSHOW", "CAP_DSHOW")):
+        available: dict[str, int | None] = {"DEFAULT": None}
+        for name, attribute in (("DSHOW", "CAP_DSHOW"), ("MSMF", "CAP_MSMF")):
             backend_id = getattr(cv2, attribute, None)
             if backend_id is not None:
-                candidates.append((name, int(backend_id)))
-        candidates.append(("DEFAULT", None))
-        return candidates
+                available[name] = int(backend_id)
+
+        if self.backend != "AUTO":
+            if self.backend not in available:
+                raise RuntimeError(
+                    f"Requested camera backend {self.backend} is unavailable in this OpenCV build"
+                )
+            return [(self.backend, available[self.backend])]
+
+        # DirectShow is tried first on Windows because it usually opens USB webcams
+        # faster and more deterministically than Media Foundation. MSMF and the
+        # OpenCV default remain as compatibility fallbacks.
+        order = ("DSHOW", "MSMF", "DEFAULT")
+        return [(name, available[name]) for name in order if name in available]
+
+    @staticmethod
+    def _normalize_backend(backend: str) -> str:
+        normalized = str(backend).strip().upper()
+        aliases = {
+            "AUTO": "AUTO",
+            "DSHOW": "DSHOW",
+            "DIRECTSHOW": "DSHOW",
+            "MSMF": "MSMF",
+            "MEDIAFOUNDATION": "MSMF",
+            "DEFAULT": "DEFAULT",
+        }
+        try:
+            return aliases[normalized]
+        except KeyError as exc:
+            allowed = "auto, dshow, msmf, default"
+            raise ValueError(f"Unsupported camera backend {backend!r}; choose {allowed}") from exc
 
     @staticmethod
     def _create_camera_capture(cv2: Any, camera_index: int, backend_id: int | None) -> Any:
@@ -135,7 +165,7 @@ class OpenCvCameraSource:
             capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
     @staticmethod
-    def _read_initial_frame(capture: Any, attempts: int = 5, delay_s: float = 0.05) -> Any | None:
+    def _read_initial_frame(capture: Any, attempts: int = 6, delay_s: float = 0.03) -> Any | None:
         for attempt in range(attempts):
             ok, frame = capture.read()
             if ok and frame is not None:
