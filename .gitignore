@@ -1,0 +1,70 @@
+# Python cache / local state
+.agents/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Local experiment data and generated outputs
+logged_data/
+plot_generation/generated_plots/
+
+# Live mutable GUI/calibration state
+computer/modes/mode_3_software_simulation/full_system_simulation/manual_input_state.json
+
+
+# Large/raw data and generated analysis files
+*.csv
+*.tsv
+*.xlsx
+*.mat
+*.h5
+*.npz
+
+# Experiment media
+*.mp4
+*.mov
+*.avi
+*.mkv
+
+# Secrets / private settings
+.env
+*.env
+secrets.*
+credentials.*
+tokens.*
+
+# Build outputs
+build/
+dist/
+*.elf
+*.bin
+*.hex
+.pio/
+
+# IDE / OS noise
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Generated diagnostics (keep only the folder contract)
+diagnostic_logs/*
+!diagnostic_logs/README.md
+logs/
+
+# Local packaged assistant/tooling artifacts
+.agents.zip
+.venv-vision/
+computer/vision_imu_calibration/models/*.tflite
+vision_calibration_recordings/

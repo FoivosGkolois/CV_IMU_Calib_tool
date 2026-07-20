@@ -1,0 +1,7 @@
+{
+  "model_name": "MoveNet SinglePose Thunder TFLite Float16 v4",
+  "source_url": "https://tfhub.dev/google/lite-model/movenet/singlepose/thunder/tflite/float16/4?lite-format=tflite",
+  "downloaded_at_utc": "2026-07-19T19:37:03+00:00",
+  "size_bytes": 12584128,
+  "sha256": "41641538679ec79b07d4101e591dda47d098c09af29607674b2a40b8a3798dd3"
+}

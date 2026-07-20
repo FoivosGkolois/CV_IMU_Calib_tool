@@ -1,0 +1,66 @@
+Vision–IMU synchronized camera + dual-IMU calibration patch
+
+BASELINE
+- Source: Thesis_master(40).zip
+- Branch: master_2
+- Baseline commit: f738a96
+- Validation branch: vision_imu_calibration_tool
+- Validation commit: 841756f
+
+COPY
+Extract this ZIP into the root of the current Thesis_master folder.
+Keep the directory structure and replace .gitignore if asked.
+No existing source file is deleted.
+
+WHAT IS ADDED
+- PC MoveNet Thunder vision calibration tool
+- UNO R4 standalone dual-LSM6DSOX acquisition sketch
+- USB serial IMUCAL v1 receiver
+- common PC monotonic timestamps for camera and IMU
+- raw_imu.csv and synchronized_timeline.csv session outputs
+- web UI IMU readiness/rate/drop diagnostics
+- Windows launchers 08, 09, 10, 11
+
+HARDWARE RUN ORDER
+1. Run 08_SETUP_VISION_IMU_PC.bat
+2. Run 10_TEST_VISION_IMU_PC.bat
+3. In Arduino IDE upload exactly:
+   standalone_tools/vision_imu_calibration/arduino/uno_r4_dual_imu_stream/uno_r4_dual_imu_stream.ino
+4. Close Arduino Serial Monitor.
+5. Run 11_RUN_VISION_IMU_SYNC_PC.bat
+6. Enter the UNO R4 COM port, e.g. COM3.
+7. In the browser wait for:
+   - Runtime RUNNING
+   - IMU state CONNECTED
+   - Thigh READY and Shank READY
+   - IMU rate close to 100 Hz after recording starts
+8. Select Left or Right leg manually.
+9. Start recording, stay still 5 s, perform 5 slow flexion-extension cycles, then Stop.
+
+UNO R4 BUS NOTE
+The sketch defaults to UNO R4 WiFi Modulino/Qwiic wiring on Wire1.
+For sensors on normal SDA/SCL pins or UNO R4 Minima, set IMUCAL_USE_WIRE1 to 0.
+
+EXPECTED SESSION FILES
+vision_calibration_recordings/vision_imu_session_<timestamp>/
+- annotated_pose.mp4 or .avi
+- pose_timeline.csv
+- raw_imu.csv
+- synchronized_timeline.csv
+- recording_metadata.json
+
+VALIDATION COMPLETED
+- Python compileall: PASS
+- Full computer test suite: 208 passed
+- git diff --check: PASS
+- Arduino sketch static review: PASS
+
+REMAINING HARDWARE CHECKS
+- Arduino IDE compile for the exact UNO R4 board
+- both IMUs detected at 0x6A and 0x6B
+- sustained ~100 Hz stream
+- zero parser errors / queue drops / unexplained sample gaps
+- synchronized_timeline.csv generated after Stop
+
+GIT COMMIT TITLE
+Add synchronized Vision-IMU calibration capture
