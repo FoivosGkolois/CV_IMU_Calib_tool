@@ -21,14 +21,12 @@ _PAGE = r'''<!doctype html>
 * { box-sizing:border-box; }
 html { min-width:320px; }
 body { margin:0; background:var(--bg); color:var(--text); overflow-x:hidden; }
-header { padding:14px clamp(16px,2.2vw,28px); border-bottom:1px solid var(--line); background:#101722; }
-h1 { margin:0; font-size:clamp(18px,1.7vw,24px); letter-spacing:.035em; }
-.sub { margin-top:5px; color:var(--muted); font-size:clamp(11px,1vw,13px); }
-main { display:grid; grid-template-columns:minmax(0,1fr) minmax(300px,360px); gap:16px; padding:16px; max-width:1580px; margin:0 auto; align-items:start; }
-.primary-column { min-width:0; display:grid; gap:12px; }
-.video-shell { background:#05070b; border:1px solid var(--line); border-radius:14px; overflow:hidden; width:min(100%,960px); aspect-ratio:16 / 9; justify-self:center; align-self:start; display:flex; align-items:center; justify-content:center; transition:width .12s ease,height .12s ease; }
+main { display:grid; grid-template-columns:minmax(360px,max-content) minmax(360px,1fr) minmax(300px,340px); gap:12px; padding:12px; width:100%; max-width:none; margin:0; align-items:start; }
+.camera-column { min-width:0; display:flex; justify-content:flex-start; align-items:flex-start; }
+.live-column { min-width:0; display:grid; grid-template-rows:auto minmax(280px,1fr); gap:10px; }
+.video-shell { background:#05070b; border:1px solid var(--line); border-radius:14px; overflow:hidden; width:min(100%,960px); aspect-ratio:16 / 9; justify-self:start; align-self:start; display:flex; align-items:center; justify-content:center; transition:width .12s ease,height .12s ease; }
 .video-shell img { width:100%; height:100%; object-fit:contain; display:block; }
-.live-summary { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; }
+.live-summary { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
 .summary-card, .card, .chart-card { background:var(--surface); border:1px solid var(--line); border-radius:12px; }
 .summary-card { padding:10px 12px; min-width:0; }
 .summary-card .value { font-size:clamp(16px,1.4vw,21px); }
@@ -67,22 +65,22 @@ button:disabled { opacity:.45; cursor:not-allowed; }
 .metric .name { color:var(--muted); font-size:9px; text-transform:uppercase; letter-spacing:.07em; }
 .metric .number { margin-top:4px; font-size:16px; font-weight:700; overflow-wrap:anywhere; }
 .chart-card { padding:12px; }
-.chart-shell { height:190px; margin-top:8px; }
+.chart-shell { height:clamp(280px,calc(100vh - 245px),650px); margin-top:8px; }
 .chart-shell canvas { width:100%; height:100%; display:block; background:#0a101a; border-radius:9px; }
-footer { max-width:1580px; margin:0 auto; padding:0 16px 16px; color:#73849c; font-size:10px; }
-@media (max-width:1180px) {
-  main { grid-template-columns:1fr; max-width:960px; }
-  .control-panel { position:static; max-height:none; overflow:visible; grid-template-columns:repeat(2,minmax(0,1fr)); }
+footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size:10px; }
+@media (max-width:1280px) {
+  main { grid-template-columns:minmax(340px,max-content) minmax(340px,1fr); }
+  .control-panel { grid-column:1 / -1; position:static; max-height:none; overflow:visible; grid-template-columns:repeat(2,minmax(0,1fr)); }
   .control-panel > .wide { grid-column:1 / -1; }
-  .video-shell { max-width:100%; }
 }
-@media (max-width:720px) {
-  main { padding:10px; gap:10px; }
+@media (max-width:860px) {
+  main { grid-template-columns:1fr; padding:10px; gap:10px; }
+  .camera-column { justify-content:flex-start; }
+  .live-column { grid-template-rows:auto auto; }
   .control-panel { grid-template-columns:1fr; }
   .live-summary { grid-template-columns:repeat(2,minmax(0,1fr)); }
-  .video-shell { max-width:100%; }
+  .chart-shell { height:260px; }
   .button-grid { grid-template-columns:1fr 1fr; }
-  header { padding:12px 14px; }
 }
 @media (max-width:440px) {
   .live-summary { grid-template-columns:1fr; }
@@ -91,13 +89,11 @@ footer { max-width:1580px; margin:0 auto; padding:0 16px 16px; color:#73849c; fo
 </style>
 </head>
 <body>
-<header>
-<h1>VISION–IMU ACQUISITION & PRESENTATION</h1>
-<div class="sub">Live visual reference, raw dual-IMU acquisition, STM32-equivalent filter output, synchronized recording, and evidence presentation</div>
-</header>
 <main>
-<section class="primary-column">
+<section class="camera-column">
   <div id="videoShell" class="video-shell"><img id="videoStream" src="/video.mjpg" alt="Live camera stream"></div>
+</section>
+<section class="live-column">
   <div class="live-summary">
     <div class="summary-card"><div class="label">Tracking</div><div id="tracking" class="value">Starting…</div><div id="reason" class="small">Initializing camera and pose model</div></div>
     <div class="summary-card"><div class="label">Visual angle</div><div id="angle" class="value">--.-°</div><div id="rawAngle" class="small">Raw: --.-°</div></div>
@@ -242,9 +238,9 @@ function resizeVideoShell(){
   const naturalHeight=Number(videoStream.naturalHeight||0);
   if(!naturalWidth||!naturalHeight) return;
   const availableWidth=Math.max(1,videoShell.parentElement.clientWidth);
-  const singleColumn=window.matchMedia('(max-width:1180px)').matches;
-  const reservedHeight=singleColumn?170:150;
-  const availableHeight=Math.max(260,Math.min(760,window.innerHeight-reservedHeight));
+  const singleColumn=window.matchMedia('(max-width:860px)').matches;
+  const reservedHeight=singleColumn?24:24;
+  const availableHeight=Math.max(260,Math.min(900,window.innerHeight-reservedHeight));
   const aspect=naturalWidth/naturalHeight;
   const width=Math.min(availableWidth,availableHeight*aspect);
   const height=width/aspect;

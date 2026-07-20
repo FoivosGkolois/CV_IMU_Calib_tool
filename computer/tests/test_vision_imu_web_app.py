@@ -110,3 +110,18 @@ def test_page_uses_adaptive_video_shell_and_compact_camera_overlay_contract() ->
     assert "videoStream.naturalWidth" in html
     assert "setInterval(resizeVideoShell,1000)" in html
     assert 'alt="Live camera stream"' in html
+
+
+def test_page_uses_left_camera_live_dashboard_workspace_without_header() -> None:
+    runtime = FakeRuntime()
+    app = create_app(runtime)  # type: ignore[arg-type]
+    client = app.test_client()
+
+    html = client.get("/").get_data(as_text=True)
+    assert "VISION–IMU ACQUISITION & PRESENTATION" not in html
+    assert '<section class="camera-column">' in html
+    assert '<section class="live-column">' in html
+    assert html.index('class="camera-column"') < html.index('class="live-column"')
+    assert html.index('class="live-column"') < html.index('class="control-panel"')
+    assert "grid-template-columns:minmax(360px,max-content) minmax(360px,1fr) minmax(300px,340px)" in html
+    assert "justify-self:start" in html

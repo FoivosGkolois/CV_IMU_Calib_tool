@@ -1,36 +1,28 @@
-Vision-IMU — Adaptive Camera View and Minimal Overlay Patch
+Vision-IMU — Left camera + live dashboard layout patch
 
 BASELINE
-Standalone tool:
+Standalone tool at:
 C:\Users\phevo\Desktop\CV_IMU_Calib_tool
-with the Responsive UI & ZIP Recorder patch already applied.
+
+Apply after the Adaptive Camera & Minimal Overlay patch.
 
 AFFECTED AREA
-- Browser camera viewport sizing
-- Camera-frame annotation only
+Web GUI layout only.
 
-MAIN CHANGE
-1. The webcam container now follows the actual MJPEG frame aspect ratio.
-   It recalculates after stream load, browser resize/zoom, camera-profile changes,
-   and periodically in case frame rotation changes the encoded dimensions.
-
-2. The camera overlay now contains only one compact top-left badge:
-   TRACKING VALID or TRACKING INVALID.
-
-REMOVED FROM THE CAMERA IMAGE
-- Large information panel
-- Pose sticks and joint markers
-- Knee-angle arc and numeric label
-- Confidence, FPS, source, and recorder text
-
-All detailed values remain available in the GUI cards and live chart.
-Recorded annotated_pose.mp4 also uses the new minimal status badge.
+CHANGES
+- Removes the visible page title/header.
+- Places the adaptive webcam viewport at the far left.
+- Places the four live status cards immediately to the right of the webcam.
+- Places the live angle chart below those cards, still to the right of the webcam.
+- Keeps acquisition/recording/configuration controls as the rightmost column.
+- At narrower widths, the layout degrades to two columns and then one column.
+- Camera/IMU acquisition, filtering, synchronization, recording, and ZIP export are unchanged.
 
 COPY / REPLACE
 Extract this ZIP into:
 C:\Users\phevo\Desktop\CV_IMU_Calib_tool
 
-Keep the folder structure and replace the matching files.
+Keep the directory structure and replace the matching files.
 No file is deleted.
 
 RUN
@@ -38,20 +30,17 @@ RUN
 2. 11_RUN_VISION_IMU_SYNC_PC.bat
 
 CHECK
-- At 100%, 125%, and 150% browser zoom, the camera border should closely fit
-  the actual stream with no large unused black side areas.
-- Changing Fast/Quality or frame rotation should update the viewport dimensions.
-- The camera image should show only the compact tracking badge at top-left.
+- No title bar is visible above the workspace.
+- Webcam begins at the left page margin.
+- Tracking, visual angle, IMU angle, pose quality, and chart sit directly to its right.
+- Controls remain at the far right.
+- Check browser zoom at 100%, 125%, and 150%.
 
 VALIDATION
 - Python compileall: PASS
-- Vision-IMU targeted suite: 74 passed, 1 skipped
-- New adaptive-viewport and minimal-overlay tests: PASS
-
-MAIN RISK
-The viewport dimensions depend on the browser-reported MJPEG naturalWidth and
-naturalHeight. The periodic refresh is retained so profile/rotation changes are
-picked up without reloading the page.
+- HTML structure parse: PASS
+- Main direct-child order: camera-column -> live-column -> control-panel
+- Flask endpoint test file updated; Flask was unavailable in the packaging environment, so that suite was collected as skipped there.
 
 GIT COMMIT TITLE
-Make camera viewport adaptive and simplify tracking overlay
+Rearrange Vision-IMU workspace around the camera feed
