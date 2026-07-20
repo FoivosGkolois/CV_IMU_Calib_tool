@@ -97,7 +97,7 @@ def test_filter_reload_and_history_endpoints() -> None:
     assert history.get_json()["rows"][0]["host_monotonic_ns"] == 1
 
 
-def test_page_uses_adaptive_video_shell_and_compact_camera_overlay_contract() -> None:
+def test_page_uses_adaptive_and_user_resizable_video_shell() -> None:
     runtime = FakeRuntime()
     app = create_app(runtime)  # type: ignore[arg-type]
     client = app.test_client()
@@ -110,6 +110,9 @@ def test_page_uses_adaptive_video_shell_and_compact_camera_overlay_contract() ->
     assert "videoStream.naturalWidth" in html
     assert "setInterval(resizeVideoShell,1000)" in html
     assert 'alt="Live camera stream"' in html
+    assert 'data-resize-id="camera"' in html
+    assert "visionImuCustomBoxSizesV1" in html
+    assert "function resetCustomLayout()" in html
 
 
 def test_page_uses_left_camera_live_dashboard_workspace_without_header() -> None:
@@ -125,3 +128,21 @@ def test_page_uses_left_camera_live_dashboard_workspace_without_header() -> None
     assert html.index('class="live-column"') < html.index('class="control-panel"')
     assert "grid-template-columns:minmax(360px,max-content) minmax(360px,1fr) minmax(300px,340px)" in html
     assert "justify-self:start" in html
+
+
+def test_page_makes_live_plot_and_all_main_cards_user_resizable() -> None:
+    runtime = FakeRuntime()
+    app = create_app(runtime)  # type: ignore[arg-type]
+    client = app.test_client()
+
+    html = client.get("/").get_data(as_text=True)
+    expected_ids = (
+        "tracking-card", "visual-card", "imu-card", "pose-card", "angle-plot",
+        "recording-card", "imu-stream-card", "camera-profile-card",
+        "estimator-card", "tuning-card", "diagnostics-card",
+    )
+    for resize_id in expected_ids:
+        assert f'data-resize-id="{resize_id}"' in html
+    assert ".resizable-box { resize:both" in html
+    assert ".chart-card { padding:12px; height:270px" in html
+    assert "Reset all box sizes" in html

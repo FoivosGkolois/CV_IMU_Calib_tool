@@ -241,3 +241,10 @@ Both the visual estimator and the IMU estimator now use the same posterior-knee-
 - **smaller angle** = more knee flexion
 
 The visual overlay also draws a live colored arc behind the knee.
+
+
+## Customizable live workspace
+
+The camera, four live metric cards, angle plot, and control cards can be resized from their lower-right corner. The browser stores these dimensions locally. Use **Reset all box sizes** in the Custom layout card to return to defaults.
+
+The live video overlay includes the compact tracking badge plus the thigh/shank bars, hip-knee-ankle markers, posterior knee-angle arc, and live angle value.

@@ -21,17 +21,19 @@ _PAGE = r'''<!doctype html>
 * { box-sizing:border-box; }
 html { min-width:320px; }
 body { margin:0; background:var(--bg); color:var(--text); overflow-x:hidden; }
-main { display:grid; grid-template-columns:minmax(360px,max-content) minmax(360px,1fr) minmax(300px,340px); gap:12px; padding:12px; width:100%; max-width:none; margin:0; align-items:start; }
+main { display:grid; grid-template-columns:minmax(360px,max-content) minmax(340px,1fr) minmax(300px,340px); gap:12px; padding:12px; width:100%; max-width:none; margin:0; align-items:start; }
 .camera-column { min-width:0; display:flex; justify-content:flex-start; align-items:flex-start; }
-.live-column { min-width:0; display:grid; grid-template-rows:auto minmax(280px,1fr); gap:10px; }
-.video-shell { background:#05070b; border:1px solid var(--line); border-radius:14px; overflow:hidden; width:min(100%,960px); aspect-ratio:16 / 9; justify-self:start; align-self:start; display:flex; align-items:center; justify-content:center; transition:width .12s ease,height .12s ease; }
+.live-column { min-width:0; display:grid; grid-template-rows:auto auto; align-content:start; gap:10px; }
+.resizable-box { resize:both; position:relative; }
+.resizable-box::after { content:""; position:absolute; right:3px; bottom:3px; width:10px; height:10px; border-right:2px solid rgba(145,164,191,.65); border-bottom:2px solid rgba(145,164,191,.65); pointer-events:none; }
+.video-shell { background:#05070b; border:1px solid var(--line); border-radius:14px; overflow:hidden; width:min(100%,960px); min-width:320px; min-height:240px; max-width:100%; max-height:calc(100vh - 24px); aspect-ratio:16 / 9; justify-self:start; align-self:start; display:flex; align-items:center; justify-content:center; transition:width .12s ease,height .12s ease; }
 .video-shell img { width:100%; height:100%; object-fit:contain; display:block; }
-.live-summary { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+.live-summary { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; align-items:start; }
 .summary-card, .card, .chart-card { background:var(--surface); border:1px solid var(--line); border-radius:12px; }
-.summary-card { padding:10px 12px; min-width:0; }
+.summary-card { padding:10px 12px; min-width:150px; min-height:74px; max-width:100%; overflow:auto; }
 .summary-card .value { font-size:clamp(16px,1.4vw,21px); }
 .control-panel { min-width:0; display:grid; gap:10px; max-height:calc(100vh - 112px); overflow-y:auto; overflow-x:hidden; padding-right:3px; scrollbar-gutter:stable; position:sticky; top:12px; }
-.card { padding:12px; min-width:0; }
+.card { padding:12px; min-width:180px; min-height:72px; max-width:100%; overflow:auto; }
 .card.priority { border-color:#365374; box-shadow:0 0 0 1px rgba(57,160,255,.08); }
 .card summary { cursor:pointer; list-style:none; display:flex; align-items:center; justify-content:space-between; gap:8px; }
 .card summary::-webkit-details-marker { display:none; }
@@ -64,9 +66,11 @@ button:disabled { opacity:.45; cursor:not-allowed; }
 .metric { background:var(--surface-2); border:1px solid #2a3952; border-radius:9px; padding:8px; min-width:0; }
 .metric .name { color:var(--muted); font-size:9px; text-transform:uppercase; letter-spacing:.07em; }
 .metric .number { margin-top:4px; font-size:16px; font-weight:700; overflow-wrap:anywhere; }
-.chart-card { padding:12px; }
-.chart-shell { height:clamp(280px,calc(100vh - 245px),650px); margin-top:8px; }
+.chart-card { padding:12px; height:270px; min-width:280px; min-height:210px; max-width:100%; overflow:hidden; }
+.chart-shell { height:calc(100% - 48px); min-height:140px; margin-top:8px; }
 .chart-shell canvas { width:100%; height:100%; display:block; background:#0a101a; border-radius:9px; }
+.layout-tools { display:grid; gap:8px; }
+.layout-tools .note { margin-top:0; }
 footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size:10px; }
 @media (max-width:1280px) {
   main { grid-template-columns:minmax(340px,max-content) minmax(340px,1fr); }
@@ -79,7 +83,8 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
   .live-column { grid-template-rows:auto auto; }
   .control-panel { grid-template-columns:1fr; }
   .live-summary { grid-template-columns:repeat(2,minmax(0,1fr)); }
-  .chart-shell { height:260px; }
+  .chart-card { width:100%; height:250px; }
+  .chart-shell { height:calc(100% - 48px); }
   .button-grid { grid-template-columns:1fr 1fr; }
 }
 @media (max-width:440px) {
@@ -91,23 +96,23 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
 <body>
 <main>
 <section class="camera-column">
-  <div id="videoShell" class="video-shell"><img id="videoStream" src="/video.mjpg" alt="Live camera stream"></div>
+  <div id="videoShell" class="video-shell resizable-box" data-resize-id="camera"><img id="videoStream" src="/video.mjpg" alt="Live camera stream"></div>
 </section>
 <section class="live-column">
   <div class="live-summary">
-    <div class="summary-card"><div class="label">Tracking</div><div id="tracking" class="value">Starting…</div><div id="reason" class="small">Initializing camera and pose model</div></div>
-    <div class="summary-card"><div class="label">Visual angle</div><div id="angle" class="value">--.-°</div><div id="rawAngle" class="small">Raw: --.-°</div></div>
-    <div class="summary-card"><div class="label">IMU angle</div><div id="imuAngle" class="value">--.-°</div><div id="imuEstimatorState" class="small">NO SAMPLE</div></div>
-    <div class="summary-card"><div class="label">Pose quality</div><div id="confidence" class="value">0.00</div><div id="fps" class="small">0.0 FPS</div></div>
+    <div class="summary-card resizable-box" data-resize-id="tracking-card"><div class="label">Tracking</div><div id="tracking" class="value">Starting…</div><div id="reason" class="small">Initializing camera and pose model</div></div>
+    <div class="summary-card resizable-box" data-resize-id="visual-card"><div class="label">Visual angle</div><div id="angle" class="value">--.-°</div><div id="rawAngle" class="small">Raw: --.-°</div></div>
+    <div class="summary-card resizable-box" data-resize-id="imu-card"><div class="label">IMU angle</div><div id="imuAngle" class="value">--.-°</div><div id="imuEstimatorState" class="small">NO SAMPLE</div></div>
+    <div class="summary-card resizable-box" data-resize-id="pose-card"><div class="label">Pose quality</div><div id="confidence" class="value">0.00</div><div id="fps" class="small">0.0 FPS</div></div>
   </div>
-  <div class="chart-card">
+  <div class="chart-card resizable-box" data-resize-id="angle-plot">
     <div class="label">Live posterior knee-angle presentation · last 15 s</div>
     <div class="note">Blue: visual reference · Green: IMU estimate. Presentation only; no scoring or recommendation.</div>
     <div class="chart-shell"><canvas id="angleChart"></canvas></div>
   </div>
 </section>
 <aside class="control-panel">
-  <div class="card priority wide">
+  <div class="card priority wide resizable-box" data-resize-id="recording-card">
     <div class="label">Recording</div>
     <div id="recording" class="value small">IDLE</div>
     <div class="button-grid">
@@ -117,7 +122,7 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
     <button id="recordingPath" class="path-link" onclick="openRecordingsLocation()" disabled>Trials are finalized as ZIP files inside the recordings folder.</button>
   </div>
 
-  <div class="card wide">
+  <div class="card wide resizable-box" data-resize-id="imu-stream-card">
     <div class="label">UNO R4 raw IMU stream</div>
     <div id="imuState" class="value small">DISCONNECTED</div>
     <div class="inline-grid"><select id="imuPort"><option value="">Select COM port</option></select><button class="secondary" onclick="refreshImuPorts()">Refresh</button></div>
@@ -128,14 +133,14 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
     <div id="imuHealth" class="note">Samples: 0 · Gaps: 0 · Parse errors: 0 · Queue drops: 0</div>
   </div>
 
-  <div class="card">
+  <div class="card resizable-box" data-resize-id="camera-profile-card">
     <div class="label">Camera profile</div>
     <select id="cameraProfile" style="margin-top:8px"><option value="fast">Fast · 640×480</option><option value="quality">Quality · 1280×720</option></select>
     <button id="applyCameraProfile" class="primary" style="margin-top:8px" onclick="setCameraProfile()">Apply profile</button>
     <div id="cameraProfileMessage" class="note"><b>Fast:</b> lower load. <b>Quality:</b> more detail at difficult angles.</div>
   </div>
 
-  <details class="card" open>
+  <details class="card resizable-box" data-resize-id="estimator-card" open>
     <summary><span class="label">IMU estimator details</span></summary>
     <div class="metric-grid">
       <div class="metric"><div class="name">Visual − IMU</div><div id="angleDifference" class="number">--.-°</div></div>
@@ -147,7 +152,7 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
     <div id="imuFilterInfo" class="note">Waiting for synchronized raw IMU samples.</div>
   </details>
 
-  <details class="card wide">
+  <details class="card wide resizable-box" data-resize-id="tuning-card">
     <summary><span class="label">Pose-reference tuning</span></summary>
     <div class="controls">
       <div class="control-row">
@@ -170,7 +175,13 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
     <div id="tuningMessage" class="note">Application-level filtering only; model weights are unchanged.</div>
   </details>
 
-  <details class="card wide">
+  <div class="card wide layout-tools">
+    <div class="label">Custom layout</div>
+    <div class="note">Drag the lower-right corner of the camera, live cards, plot, or control boxes. Sizes are saved in this browser.</div>
+    <button class="secondary" onclick="resetCustomLayout()">Reset all box sizes</button>
+  </div>
+
+  <details class="card wide resizable-box" data-resize-id="diagnostics-card">
     <summary><span class="label">Runtime diagnostics</span></summary>
     <div id="runtime" class="value small">STARTING</div>
     <div id="backend" class="note">Backend: MoveNet Thunder</div>
@@ -233,14 +244,64 @@ const reloadImuFilter=document.getElementById('reloadImuFilter');
 const angleChart=document.getElementById('angleChart');
 const videoShell=document.getElementById('videoShell');
 const videoStream=document.getElementById('videoStream');
-function resizeVideoShell(){
+const LAYOUT_STORAGE_KEY='visionImuCustomBoxSizesV1';
+function readStoredLayout(){
+  try { return JSON.parse(localStorage.getItem(LAYOUT_STORAGE_KEY)||'{}'); }
+  catch(e) { return {}; }
+}
+function writeStoredLayout(layout){
+  try { localStorage.setItem(LAYOUT_STORAGE_KEY,JSON.stringify(layout)); }
+  catch(e) {}
+}
+function restoreCustomLayout(){
+  const layout=readStoredLayout();
+  for(const box of document.querySelectorAll('[data-resize-id]')){
+    const saved=layout[box.dataset.resizeId];
+    if(!saved) continue;
+    if(Number(saved.width)>0) box.style.width=Number(saved.width)+'px';
+    if(Number(saved.height)>0) box.style.height=Number(saved.height)+'px';
+    box.dataset.userSized='true';
+  }
+}
+function registerResizableBoxes(){
+  for(const box of document.querySelectorAll('[data-resize-id]')){
+    box.title='Drag the lower-right corner to resize';
+    box.addEventListener('pointerdown',(event)=>{
+      const start=box.getBoundingClientRect();
+      const nearResizeCorner=event.clientX>=start.right-24&&event.clientY>=start.bottom-24;
+      if(!nearResizeCorner) return;
+      const finish=()=>{
+        const end=box.getBoundingClientRect();
+        if(Math.abs(end.width-start.width)<2&&Math.abs(end.height-start.height)<2) return;
+        const layout=readStoredLayout();
+        layout[box.dataset.resizeId]={width:Math.round(end.width),height:Math.round(end.height)};
+        writeStoredLayout(layout);
+        box.dataset.userSized='true';
+        if(box===videoShell) videoShell.style.aspectRatio='auto';
+        drawAngleChart(window.latestAngleRows||[]);
+      };
+      window.addEventListener('pointerup',finish,{once:true});
+    });
+  }
+}
+function resetCustomLayout(){
+  try { localStorage.removeItem(LAYOUT_STORAGE_KEY); } catch(e) {}
+  for(const box of document.querySelectorAll('[data-resize-id]')){
+    box.style.removeProperty('width');
+    box.style.removeProperty('height');
+    box.dataset.userSized='false';
+  }
+  videoShell.style.removeProperty('aspect-ratio');
+  resizeVideoShell(true);
+  drawAngleChart(window.latestAngleRows||[]);
+}
+function resizeVideoShell(force=false){
+  if(!force&&videoShell.dataset.userSized==='true') return;
   const naturalWidth=Number(videoStream.naturalWidth||0);
   const naturalHeight=Number(videoStream.naturalHeight||0);
   if(!naturalWidth||!naturalHeight) return;
   const availableWidth=Math.max(1,videoShell.parentElement.clientWidth);
-  const singleColumn=window.matchMedia('(max-width:860px)').matches;
-  const reservedHeight=singleColumn?24:24;
-  const availableHeight=Math.max(260,Math.min(900,window.innerHeight-reservedHeight));
+  const availableHeight=Math.max(260,Math.min(900,window.innerHeight-24));
   const aspect=naturalWidth/naturalHeight;
   const width=Math.min(availableWidth,availableHeight*aspect);
   const height=width/aspect;
@@ -248,8 +309,10 @@ function resizeVideoShell(){
   videoShell.style.height=Math.max(1,Math.round(height))+'px';
   videoShell.style.aspectRatio=String(aspect);
 }
-videoStream.addEventListener('load',resizeVideoShell);
-window.addEventListener('resize',resizeVideoShell,{passive:true});
+restoreCustomLayout();
+registerResizableBoxes();
+videoStream.addEventListener('load',()=>resizeVideoShell(false));
+window.addEventListener('resize',()=>{ resizeVideoShell(false); drawAngleChart(window.latestAngleRows||[]); },{passive:true});
 function updateSliderLabels(){
   confidenceThresholdValue.textContent=Number(confidenceThreshold.value).toFixed(2);
   landmarkSmoothingValue.textContent=Number(landmarkSmoothing.value).toFixed(2);
@@ -358,7 +421,7 @@ function drawAngleChart(rows){
   line('visual_knee_angle_deg','visual_valid','#39a0ff'); line('imu_knee_angle_deg','imu_valid','#51e26d');
   ctx.fillStyle='#91a4bf'; ctx.font='10px Segoe UI'; ctx.fillText('−15 s',left,height-8); ctx.fillText('now',width-right-22,height-8);
 }
-async function refreshHistory(){ try{ const r=await fetch('/api/acquisition/history?seconds=15&max_points=300',{cache:'no-store'}); const body=await r.json(); if(r.ok) drawAngleChart(body.rows||[]); }catch(e){} }
+async function refreshHistory(){ try{ const r=await fetch('/api/acquisition/history?seconds=15&max_points=300',{cache:'no-store'}); const body=await r.json(); if(r.ok){ window.latestAngleRows=body.rows||[]; drawAngleChart(window.latestAngleRows); } }catch(e){} }
 async function refresh(){
   try {
     const r=await fetch('/api/status',{cache:'no-store'}); const s=await r.json();
@@ -408,7 +471,7 @@ async function refresh(){
     if(!window.tuningLoaded && s.tuning){ loadTuning(s.tuning); window.tuningLoaded=true; }
   } catch(e) { runtime.textContent='UI connection error: '+e; }
 }
-setInterval(refresh,350); setInterval(refreshHistory,700); setInterval(resizeVideoShell,1000); refresh(); refreshHistory(); refreshImuPorts(); resizeVideoShell();
+setInterval(refresh,350); setInterval(refreshHistory,700); setInterval(()=>resizeVideoShell(false),1500); refresh(); refreshHistory(); refreshImuPorts(); resizeVideoShell(false);
 </script>
 </body>
 </html>
