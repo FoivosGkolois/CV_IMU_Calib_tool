@@ -9,29 +9,27 @@ if not exist "%VISION_PYTHON%" (
     goto :failed
 )
 
-set "IMU_PORT=%~1"
-if "%IMU_PORT%"=="" (
-    set /p IMU_PORT=Enter UNO R4 COM port ^(example COM3^): 
-)
-if "%IMU_PORT%"=="" (
-    echo ERROR: No COM port provided.
+"%VISION_PYTHON%" -c "import serial" >nul 2>&1
+if errorlevel 1 (
+    echo ERROR: pyserial is missing from .venv-vision.
+    echo Run 08_SETUP_VISION_IMU_PC.bat once, then retry.
     goto :failed
 )
 
 echo Starting synchronized Vision-IMU recorder...
 echo Camera index: 0
-echo Camera mode: 640x480 at 30 FPS, fast Windows backend selection
-echo UNO R4 IMU port: %IMU_PORT%
+echo Camera profile: select Fast or Quality inside the web GUI
+echo UNO R4 IMU: select COM port and press Connect inside the web GUI
 echo URL: http://127.0.0.1:8765
 echo.
 
-"%VISION_PYTHON%" -m computer.vision_imu_calibration --camera 0 --camera-backend auto --width 640 --height 480 --leg auto --inference-threads 4 --imu-port "%IMU_PORT%"
+"%VISION_PYTHON%" -m computer.vision_imu_calibration --camera 0 --camera-backend auto --width 640 --height 480 --leg auto --inference-threads 4
 set "APP_EXIT_CODE=%ERRORLEVEL%"
 
 echo.
 if not "%APP_EXIT_CODE%"=="0" (
     echo The synchronized recorder stopped with exit code %APP_EXIT_CODE%.
-    echo Check the camera, COM port, uploaded UNO R4 sketch, and error above.
+    echo Check the camera and error above.
 ) else (
     echo Vision-IMU application stopped normally.
 )

@@ -38,6 +38,9 @@ if errorlevel 1 goto :failed
 python -c "from ai_edge_litert.interpreter import Interpreter; print('LiteRT interpreter: OK')"
 if errorlevel 1 goto :failed
 
+python -c "import serial; from serial.tools import list_ports; print('pyserial: OK')"
+if errorlevel 1 goto :failed
+
 echo.
 echo MoveNet Thunder vision environment is ready.
 echo Next command: 10_TEST_VISION_IMU_PC.bat

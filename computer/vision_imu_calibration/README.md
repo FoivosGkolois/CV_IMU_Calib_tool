@@ -169,3 +169,24 @@ A valid hardware trial should show:
 - synchronized camera rows with low and stable `sync_delta_ms`.
 
 The next milestone after this gate is the Python mirror of `knee_angle.cpp` and offline parameter scoring.
+
+## Manual UNO R4 serial connection
+
+The calibration web page owns the standalone IMU serial connection:
+
+1. Upload `standalone_tools/vision_imu_calibration/arduino/uno_r4_dual_imu_stream/uno_r4_dual_imu_stream.ino`.
+2. Close Arduino Serial Monitor and any other program using the COM port.
+3. Start the calibration application with `11_RUN_VISION_IMU_SYNC_PC.bat`.
+4. In the **UNO R4 raw IMU stream** card, press **Refresh**, select the UNO R4 COM port, and press **Connect**.
+5. Wait for `CONNECTED`, `Thigh: READY`, and `Shank: READY` before recording.
+
+The COM connection can be changed only while the recorder is idle. This prevents a trial from mixing data from different serial sessions.
+
+## Camera quality profile
+
+The live page exposes two restartable camera profiles:
+
+- **Fast — 640×480:** faster initialization and lower CPU/USB load.
+- **Quality — 1280×720:** more source detail and potentially better tracking at difficult side-view angles.
+
+Stop recording before changing profile. The camera briefly restarts, while the MoveNet backend and the rest of the application remain loaded.

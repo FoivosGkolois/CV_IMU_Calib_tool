@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from computer.vision_imu_calibration.geometry import KneeAngleResult
-from computer.vision_imu_calibration.runtime import VisionRuntime
+from computer.vision_imu_calibration.runtime import RuntimeStatus, VisionRuntime
 
 
 class BlockingCamera:
@@ -185,3 +185,96 @@ def test_runtime_rotates_portrait_frames_using_selected_orientation() -> None:
     assert VisionRuntime._rotate_frame("frame", FrameRotation.CLOCKWISE_90, cv2) == ("frame", 0)
     assert VisionRuntime._rotate_frame("frame", FrameRotation.COUNTERCLOCKWISE_90, cv2) == ("frame", 1)
     assert VisionRuntime._rotate_frame("frame", FrameRotation.ROTATE_180, cv2) == ("frame", 2)
+
+
+class ManualImuSource:
+    instances: list["ManualImuSource"] = []
+
+    def __init__(self, port: str, *, baud_rate: int) -> None:
+        self.port = port
+        self.baud_rate = baud_rate
+        self.started = False
+        self.stopped = False
+        self.capture_active = False
+        self.__class__.instances.append(self)
+
+    def start(self) -> None:
+        self.started = True
+
+    def stop(self) -> None:
+        self.stopped = True
+
+    def get_sample(self, timeout_s: float = 0.1):
+        time.sleep(min(timeout_s, 0.01))
+        return None
+
+    def status(self) -> dict[str, object]:
+        return {
+            "configured": True,
+            "connected": self.started and not self.stopped,
+            "capture_active": self.capture_active,
+            "port": self.port,
+            "baud_rate": self.baud_rate,
+            "state": "CONNECTED" if self.started and not self.stopped else "STOPPED",
+            "sample_rate_hz": 0.0,
+            "sample_count": 0,
+            "parse_errors": 0,
+            "sequence_gaps": 0,
+            "queue_drops": 0,
+            "thigh_ready": False,
+            "shank_ready": False,
+            "last_sample_index": None,
+            "last_error": "",
+        }
+
+
+class ReconfigurableCamera(PreviewCamera):
+    video_path = None
+    width = 640
+    height = 480
+    fps = 30.0
+
+    def profile(self):
+        return {"width": self.width, "height": self.height, "fps": self.fps}
+
+    def reconfigure(self, *, width: int, height: int, fps: float) -> None:
+        self.width = width
+        self.height = height
+        self.fps = fps
+
+
+def test_runtime_manual_imu_connect_and_disconnect(tmp_path: Path) -> None:
+    ManualImuSource.instances.clear()
+    runtime = VisionRuntime(
+        PreviewCamera(),
+        FakeEstimator(),
+        recording_root=tmp_path,
+        imu_source_factory=ManualImuSource,
+    )  # type: ignore[arg-type]
+
+    connected = runtime.connect_imu("COM7", baud_rate=921600)
+    assert connected["port"] == "COM7"
+    assert connected["connected"] is True
+    source = ManualImuSource.instances[-1]
+
+    disconnected = runtime.disconnect_imu()
+    assert disconnected["state"] == "DISCONNECTED"
+    assert source.stopped is True
+
+
+def test_runtime_camera_profile_changes_live_source_settings(tmp_path: Path) -> None:
+    camera = ReconfigurableCamera()
+    runtime = VisionRuntime(camera, FakeEstimator(), recording_root=tmp_path)  # type: ignore[arg-type]
+    runtime._status = RuntimeStatus(
+        state="RUNNING", source=camera.description, requested_leg="auto", tracked_leg=None,
+        tracking_valid=False, tracking_reason="test", visual_knee_angle_deg=None,
+        raw_knee_angle_deg=None, pose_confidence=0.0, inference_fps=0.0,
+        frame_index=0, error="",
+    )
+
+    result = runtime.update_camera_profile("quality")
+
+    assert result["profile"] == "quality"
+    assert result["width"] == 1280
+    assert result["height"] == 720
+    assert result["fps"] == 30.0

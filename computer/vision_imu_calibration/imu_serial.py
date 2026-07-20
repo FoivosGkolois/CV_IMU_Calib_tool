@@ -122,6 +122,24 @@ class ImuSerialProtocol:
         )
 
 
+def list_serial_ports(list_ports_module: Any | None = None) -> list[dict[str, str]]:
+    """Return user-facing serial ports without opening them."""
+    module = list_ports_module or _load_list_ports_module()
+    ports: list[dict[str, str]] = []
+    for item in module.comports():
+        device = str(getattr(item, "device", "") or "").strip()
+        if not device:
+            continue
+        ports.append(
+            {
+                "device": device,
+                "description": str(getattr(item, "description", "") or ""),
+                "hwid": str(getattr(item, "hwid", "") or ""),
+            }
+        )
+    return sorted(ports, key=lambda entry: entry["device"].lower())
+
+
 class SerialImuSource:
     """Background pyserial source with bounded buffering and command ACKs."""
 
@@ -416,6 +434,14 @@ class SerialImuSource:
         if result.get("kind") != "ACK":
             detail = result.get("detail", "")
             raise RuntimeError(f"{command} rejected: {detail or 'NACK'}")
+
+
+def _load_list_ports_module() -> Any:
+    try:
+        from serial.tools import list_ports
+    except ImportError as exc:
+        raise RuntimeError("pyserial is not installed. Re-run 08_SETUP_VISION_IMU_PC.bat") from exc
+    return list_ports
 
 
 def _load_serial_factory() -> Any:

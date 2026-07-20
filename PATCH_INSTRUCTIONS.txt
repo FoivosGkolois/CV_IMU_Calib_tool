@@ -1,58 +1,48 @@
-Vision-IMU — Fast webcam initialization patch
+Vision-IMU manual COM connection and camera profile patch
 
 BASELINE
-Thesis_master(40) with Vision_IMU_Dual_IMU_Sync_Patch applied.
+Current Thesis_master after applying the Dual-IMU Sync and Fast Webcam Initialization patches.
 
 AFFECTED AREA
-- Windows USB webcam startup only.
-- Vision-only and synchronized Vision-IMU launchers.
+- PC calibration web UI
+- Standalone UNO R4 serial connection lifecycle
+- Live camera profile switching
+- Setup/test launchers and targeted tests
 
-MAIN CHANGE
-- Default camera mode: 640x480 at 30 FPS.
-- Windows automatic backend order: DSHOW -> MSMF -> OpenCV default.
-- Optional explicit backend:
-  --camera-backend dshow
-  --camera-backend msmf
-  --camera-backend default
-  --camera-backend auto
-
-WHY
-MoveNet Thunder internally resizes its input to 256x256.
-Negotiating 1280x720 therefore delayed camera startup without a useful
-pose-estimation benefit for this controlled calibration workflow.
+UNCHANGED
+- UNO R4 IMUCAL firmware protocol
+- Production serial TELEM
+- STM32 production firmware
+- Motor, safety, control, estimator, and logger contracts
 
 COPY / REPLACE
 Extract this ZIP into the current Thesis_master root.
-Keep the folder structure and replace the six matching files.
+Keep the folder structure and replace matching files.
 No file is deleted.
 
-RUN
-1. 10_TEST_VISION_IMU_PC.bat
-   The complete targeted Vision-IMU suite should pass.
+REQUIRED RUN ORDER
+1. Run 08_SETUP_VISION_IMU_PC.bat once.
+   This installs/verifies pyserial inside .venv-vision.
+2. Run 10_TEST_VISION_IMU_PC.bat.
+3. Upload the standalone UNO R4 sketch:
+   standalone_tools/vision_imu_calibration/arduino/uno_r4_dual_imu_stream/uno_r4_dual_imu_stream.ino
+4. Close Arduino Serial Monitor.
+5. Run 11_RUN_VISION_IMU_SYNC_PC.bat.
+6. In the web page:
+   - press Refresh under UNO R4 raw IMU stream,
+   - select the UNO R4 COM port,
+   - press Connect,
+   - wait for CONNECTED and both sensors READY.
 
-2. Vision only:
-   09_RUN_VISION_IMU_PC.bat
+CAMERA PROFILE
+- Fast: 640x480, quicker startup and lower load.
+- Quality: 1280x720, more source detail and potentially better tracking at difficult angles.
+- Stop recording before changing profile.
 
-3. Camera + UNO R4 IMUs:
-   11_RUN_VISION_IMU_SYNC_PC.bat
-
-EXPECTED
-- Camera preview begins faster.
-- Runtime source shows the selected backend, for example:
-  camera:0 [DSHOW]
-
-IF AUTO IS STILL SLOW
-Run the working backend explicitly from the project root:
-
-.venv-vision\Scripts\python.exe -m computer.vision_imu_calibration --camera 0 --camera-backend dshow --width 640 --height 480
-
-Replace dshow with msmf if the Runtime source previously showed MSMF.
-
-UNCHANGED
-- MoveNet model and pose geometry
-- Recorder and synchronized dataset contract
-- UNO R4 IMU sketch and serial protocol
-- Production TELEM, STM32 firmware, motor, and safety
+SAFETY / DATA RULES
+- COM connect/disconnect is blocked while recording.
+- Camera profile changes are blocked while recording.
+- Existing IMUCAL frame schema is unchanged.
 
 GIT COMMIT TITLE
-Speed up Vision-IMU webcam initialization
+Add manual IMU connection and camera quality profiles

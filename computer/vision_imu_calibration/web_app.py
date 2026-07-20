@@ -40,6 +40,8 @@ button.record { background:#8d2028; border-color:#d3414d; }
 button.stop { background:#263348; }
 button:disabled { opacity:.45; cursor:not-allowed; }
 .button-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:12px; }
+.inline-grid { display:grid; grid-template-columns:1fr auto; gap:8px; align-items:center; margin-top:10px; }
+.inline-grid button { width:auto; min-width:96px; }
 .note { color:#91a4bf; font-size:11px; line-height:1.45; margin-top:9px; }
 footer { max-width:1400px; margin:0 auto; padding:0 18px 18px; color:#73849c; font-size:11px; }
 @media(max-width:1050px){ main{grid-template-columns:1fr;max-width:900px}.video-shell{height:min(62vh,620px);min-height:300px}.panel{max-height:none;overflow:visible} }
@@ -57,7 +59,22 @@ footer { max-width:1400px; margin:0 auto; padding:0 18px 18px; color:#73849c; fo
 <div class="card"><div class="label">Visual knee flexion</div><div id="angle" class="value">--.-°</div><div id="rawAngle" class="small">Raw: --.-°</div></div>
 <div class="card"><div class="label">Pose confidence</div><div id="confidence" class="value">0.00</div></div>
 <div class="card"><div class="label">Inference rate</div><div id="fps" class="value">0.0 FPS</div></div>
-<div class="card"><div class="label">UNO R4 raw IMU stream</div><div id="imuState" class="value small">DISABLED</div><div id="imuRate" class="note">Rate: 0.0 Hz</div><div id="imuSensors" class="note">Thigh: — · Shank: —</div><div id="imuHealth" class="note">Samples: 0 · Gaps: 0 · Parse errors: 0</div></div>
+<div class="card">
+  <div class="label">UNO R4 raw IMU stream</div>
+  <div id="imuState" class="value small">DISCONNECTED</div>
+  <div class="inline-grid"><select id="imuPort"><option value="">Select COM port</option></select><button onclick="refreshImuPorts()">Refresh</button></div>
+  <div class="button-grid"><button id="imuConnect" class="primary" onclick="connectImu()">Connect</button><button id="imuDisconnect" class="stop" onclick="disconnectImu()">Disconnect</button></div>
+  <div id="imuMessage" class="note">Upload the standalone UNO R4 dual-IMU sketch, close Serial Monitor, then connect here.</div>
+  <div id="imuRate" class="note">Rate: 0.0 Hz · Port: —</div>
+  <div id="imuSensors" class="note">Thigh: NOT READY · Shank: NOT READY</div>
+  <div id="imuHealth" class="note">Samples: 0 · Gaps: 0 · Parse errors: 0 · Queue drops: 0</div>
+</div>
+<div class="card">
+  <div class="label">Camera quality profile</div>
+  <select id="cameraProfile" style="margin-top:10px"><option value="fast">Fast · 640×480</option><option value="quality">Quality · 1280×720</option></select>
+  <button id="applyCameraProfile" class="primary" style="margin-top:10px" onclick="setCameraProfile()">Apply camera profile</button>
+  <div id="cameraProfileMessage" class="note"><b>Fast:</b> quicker startup and lower load. <b>Quality:</b> more image detail and potentially better tracking at difficult knee angles, with slower startup.</div>
+</div>
 <div class="card">
   <div class="label">Annotated video recorder</div>
   <div id="recording" class="value small">IDLE</div>
@@ -149,6 +166,13 @@ const imuState=document.getElementById('imuState');
 const imuRate=document.getElementById('imuRate');
 const imuSensors=document.getElementById('imuSensors');
 const imuHealth=document.getElementById('imuHealth');
+const imuPort=document.getElementById('imuPort');
+const imuConnect=document.getElementById('imuConnect');
+const imuDisconnect=document.getElementById('imuDisconnect');
+const imuMessage=document.getElementById('imuMessage');
+const cameraProfile=document.getElementById('cameraProfile');
+const applyCameraProfile=document.getElementById('applyCameraProfile');
+const cameraProfileMessage=document.getElementById('cameraProfileMessage');
 function updateSliderLabels(){
   confidenceThresholdValue.textContent=Number(confidenceThreshold.value).toFixed(2);
   landmarkSmoothingValue.textContent=Number(landmarkSmoothing.value).toFixed(2);
@@ -179,6 +203,43 @@ async function applyTuning(){
   tuningMessage.textContent=r.ok?'Tuning applied live.':('Tuning rejected: '+(body.error||'unknown error'));
   if(r.ok) loadTuning(body);
 }
+async function refreshImuPorts(){
+  const selected=imuPort.value;
+  try {
+    const r=await fetch('/api/imu/ports',{cache:'no-store'}); const body=await r.json();
+    if(!r.ok) throw new Error(body.error||'port scan failed');
+    imuPort.innerHTML='<option value="">Select COM port</option>';
+    for(const port of body.ports||[]){
+      const option=document.createElement('option');
+      option.value=port.device;
+      option.textContent=port.description?`${port.device} · ${port.description}`:port.device;
+      imuPort.appendChild(option);
+    }
+    if([...imuPort.options].some(o=>o.value===selected)) imuPort.value=selected;
+    imuMessage.textContent=(body.ports||[]).length?`${body.ports.length} serial port(s) found.`:'No serial ports found.';
+  } catch(e) { imuMessage.textContent='Port scan failed: '+e; }
+}
+async function connectImu(){
+  if(!imuPort.value){ imuMessage.textContent='Select a COM port first.'; return; }
+  const r=await fetch('/api/imu/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({port:imuPort.value,baud_rate:921600})});
+  const body=await r.json();
+  imuMessage.textContent=r.ok?`Opening ${imuPort.value}; wait for CONNECTED and both sensors READY.`:'Connect failed: '+(body.error||'unknown error');
+}
+async function disconnectImu(){
+  const r=await fetch('/api/imu/disconnect',{method:'POST'}); const body=await r.json();
+  imuMessage.textContent=r.ok?'IMU serial disconnected.':'Disconnect failed: '+(body.error||'unknown error');
+}
+async function setCameraProfile(){
+  applyCameraProfile.disabled=true;
+  cameraProfileMessage.textContent='Restarting camera with '+cameraProfile.value+' profile…';
+  try {
+    const r=await fetch('/api/camera/profile',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({profile:cameraProfile.value})});
+    const body=await r.json();
+    if(!r.ok) throw new Error(body.error||'profile change failed');
+    cameraProfileMessage.textContent=`Applied ${body.profile}: ${body.width}×${body.height} @ ${Number(body.fps).toFixed(0)} FPS.`;
+  } catch(e) { cameraProfileMessage.textContent='Camera profile failed: '+e; }
+  finally { applyCameraProfile.disabled=false; }
+}
 async function recordStart(){
   const r=await fetch('/api/recording/start',{method:'POST'});
   const body=await r.json();
@@ -204,12 +265,18 @@ async function refresh(){
     runtime.textContent=s.error?`${s.state}: ${s.error}`:s.state;
     frameCount.textContent='Frames: '+Number(s.frame_index||0);
     const imu=s.imu||{};
-    imuState.textContent=imu.configured?(imu.state||'UNKNOWN'):'DISABLED';
+    imuState.textContent=imu.configured?(imu.state||'UNKNOWN'):'DISCONNECTED';
     imuState.className='value small '+(imu.connected?'ok':(imu.configured?'bad':''));
     imuRate.textContent='Rate: '+Number(imu.sample_rate_hz||0).toFixed(1)+' Hz · Port: '+(imu.port||'—');
     imuSensors.textContent='Thigh: '+(imu.thigh_ready?'READY':'NOT READY')+' · Shank: '+(imu.shank_ready?'READY':'NOT READY');
     imuHealth.textContent='Samples: '+Number(imu.sample_count||0)+' · Gaps: '+Number(imu.sequence_gaps||0)+' · Parse errors: '+Number(imu.parse_errors||0)+' · Queue drops: '+Number(imu.queue_drops||0);
     if(imu.last_error) imuHealth.textContent+=' · Error: '+imu.last_error;
+    imuConnect.disabled=Boolean(imu.configured)||Boolean((s.recording||{}).active);
+    imuDisconnect.disabled=!Boolean(imu.configured)||Boolean((s.recording||{}).active);
+    if(imu.port && [...imuPort.options].some(o=>o.value===imu.port)) imuPort.value=imu.port;
+    const camera=s.camera||{};
+    if(!window.cameraProfileLoaded && camera.profile){ cameraProfile.value=camera.profile; window.cameraProfileLoaded=true; }
+    applyCameraProfile.disabled=Boolean((s.recording||{}).active)||camera.reconfigurable===false||!['CAMERA_PREVIEW','RUNNING','AI_FAILED'].includes(s.state);
     const rec=s.recording||{};
     recording.textContent=rec.active?`RECORDING · ${Number(rec.elapsed_s||0).toFixed(1)} s · ${rec.frame_count||0} camera / ${rec.imu_sample_count||0} IMU samples`:'IDLE';
     recording.className='value small '+(rec.active?'rec':'');
@@ -219,7 +286,7 @@ async function refresh(){
     if(!window.tuningLoaded && s.tuning){ loadTuning(s.tuning); window.tuningLoaded=true; }
   } catch(e) { runtime.textContent='UI connection error: '+e; }
 }
-setInterval(refresh,350); refresh();
+setInterval(refresh,350); refresh(); refreshImuPorts();
 </script>
 </body>
 </html>
@@ -253,6 +320,45 @@ def create_app(runtime: VisionRuntime) -> Any:
             return jsonify(runtime.update_tuning(payload))
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
+
+    @app.get("/api/imu/ports")
+    def imu_ports() -> Any:
+        try:
+            return jsonify({"ports": runtime.list_imu_ports()})
+        except RuntimeError as exc:
+            return jsonify({"error": str(exc), "ports": []}), 503
+
+    @app.post("/api/imu/connect")
+    def imu_connect() -> Any:
+        payload = request.get_json(silent=True) or {}
+        try:
+            return jsonify(
+                runtime.connect_imu(
+                    str(payload.get("port", "")),
+                    baud_rate=int(payload.get("baud_rate", 921600)),
+                )
+            )
+        except (ValueError, TypeError) as exc:
+            return jsonify({"error": str(exc)}), 400
+        except RuntimeError as exc:
+            return jsonify({"error": str(exc)}), 409
+
+    @app.post("/api/imu/disconnect")
+    def imu_disconnect() -> Any:
+        try:
+            return jsonify(runtime.disconnect_imu())
+        except RuntimeError as exc:
+            return jsonify({"error": str(exc)}), 409
+
+    @app.post("/api/camera/profile")
+    def camera_profile() -> Any:
+        payload = request.get_json(silent=True) or {}
+        try:
+            return jsonify(runtime.update_camera_profile(str(payload.get("profile", ""))))
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except RuntimeError as exc:
+            return jsonify({"error": str(exc)}), 409
 
     @app.post("/api/recording/start")
     def start_recording() -> Any:

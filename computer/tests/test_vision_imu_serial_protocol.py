@@ -58,3 +58,21 @@ def test_source_counts_sequence_gaps_and_buffers_samples() -> None:
     assert status["sequence_gaps"] == 2
     assert source.get_sample(timeout_s=0.0) == first
     assert source.get_sample(timeout_s=0.0) == second
+
+
+def test_list_serial_ports_returns_sorted_user_facing_entries() -> None:
+    from types import SimpleNamespace
+
+    from computer.vision_imu_calibration.imu_serial import list_serial_ports
+
+    fake_module = SimpleNamespace(
+        comports=lambda: [
+            SimpleNamespace(device="COM12", description="UNO R4", hwid="USB VID:PID=2341"),
+            SimpleNamespace(device="COM3", description="USB Serial", hwid="USB VID:PID=1111"),
+        ]
+    )
+
+    ports = list_serial_ports(fake_module)
+
+    assert [port["device"] for port in ports] == ["COM12", "COM3"]
+    assert ports[0]["description"] == "UNO R4"

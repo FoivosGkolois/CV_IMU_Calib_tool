@@ -135,3 +135,35 @@ def test_default_camera_profile_is_lightweight() -> None:
     assert source.width == 640
     assert source.height == 480
     assert source.fps == 30.0
+
+
+class SequentialFakeCv2(FakeCv2):
+    def __init__(self, captures: dict[tuple[int, int | None], list[FakeCapture]]) -> None:
+        self.capture_sequences = captures
+        self.calls: list[tuple[int, int | None]] = []
+
+    def VideoCapture(self, source: int, backend: int | None = None) -> FakeCapture:  # noqa: N802
+        key = (source, backend)
+        self.calls.append(key)
+        return self.capture_sequences[key].pop(0)
+
+
+def test_camera_reconfigure_reopens_with_new_profile() -> None:
+    first = FakeCapture(opened=True, frames=["first"])
+    second = FakeCapture(opened=True, frames=["quality"])
+    cv2 = SequentialFakeCv2({(0, 700): [first, second]})
+    source = OpenCvCameraSource(
+        camera_index=0,
+        backend="dshow",
+        cv2_module=cv2,
+        platform_name="Windows",
+    )
+
+    source.open()
+    source.reconfigure(width=1280, height=720, fps=30.0)
+
+    assert first.released is True
+    assert source.profile() == {"width": 1280, "height": 720, "fps": 30.0}
+    assert source.read() == ("flipped", "quality", 1)
+    assert (cv2.CAP_PROP_FRAME_WIDTH, 1280) in second.set_calls
+    assert (cv2.CAP_PROP_FRAME_HEIGHT, 720) in second.set_calls

@@ -8,13 +8,39 @@ from typing import Any, Mapping
 
 from .camera_source import OpenCvCameraSource
 from .geometry import KneeAngleResult, calculate_knee_flexion_deg
-from .imu_serial import SerialImuSource
+from .imu_serial import IMUCAL_BAUD_RATE, SerialImuSource, list_serial_ports
 from .landmark_filter import LegLandmarkEmaFilter
 from .models import LegSide
 from .overlay import draw_leg_overlay
 from .pose_estimator import PoseEstimator
 from .recorder import AnnotatedVideoRecorder
 from .tuning import FrameRotation, RuntimeTuning
+
+
+CAMERA_PROFILES: dict[str, tuple[int, int, float]] = {
+    "fast": (640, 480, 30.0),
+    "quality": (1280, 720, 30.0),
+}
+
+
+def _empty_imu_status() -> dict[str, Any]:
+    return {
+        "configured": False,
+        "connected": False,
+        "capture_active": False,
+        "port": "",
+        "baud_rate": 0,
+        "state": "DISCONNECTED",
+        "sample_rate_hz": 0.0,
+        "sample_count": 0,
+        "parse_errors": 0,
+        "sequence_gaps": 0,
+        "queue_drops": 0,
+        "thigh_ready": False,
+        "shank_ready": False,
+        "last_sample_index": None,
+        "last_error": "",
+    }
 
 
 @dataclass(frozen=True)
@@ -50,6 +76,7 @@ class VisionRuntime:
         confidence_threshold: float = 0.30,
         recording_root: str | Path = "vision_calibration_recordings",
         imu_source: SerialImuSource | None = None,
+        imu_source_factory: Any = SerialImuSource,
     ) -> None:
         self.camera = camera
         self.estimator = estimator
@@ -58,7 +85,9 @@ class VisionRuntime:
             confidence_threshold=float(confidence_threshold),
         )
         self.recorder = AnnotatedVideoRecorder(recording_root)
-        self.imu_source = imu_source
+        self._imu_source = imu_source
+        self._imu_source_factory = imu_source_factory
+        self._imu_lock = threading.RLock()
         self._lock = threading.RLock()
         self._new_frame = threading.Condition(self._lock)
         self._stop_event = threading.Event()
@@ -70,6 +99,8 @@ class VisionRuntime:
         self._latest_jpeg: bytes | None = None
         self._frame_sequence = 0
         self._pose_error = ""
+        self._reset_tracking_event = threading.Event()
+        self._camera_profile = self._infer_camera_profile()
         self._status = RuntimeStatus(
             state="IDLE",
             source=self.camera.description,
@@ -85,6 +116,153 @@ class VisionRuntime:
             error="",
         )
 
+    @property
+    def imu_source(self) -> SerialImuSource | None:
+        with self._imu_lock:
+            return self._imu_source
+
+    def list_imu_ports(self) -> list[dict[str, str]]:
+        return list_serial_ports()
+
+    def connect_imu(self, port: str, *, baud_rate: int = IMUCAL_BAUD_RATE) -> dict[str, Any]:
+        if self.recorder.status().active:
+            raise RuntimeError("Stop recording before changing the IMU serial connection")
+        clean_port = str(port or "").strip()
+        if not clean_port:
+            raise ValueError("Select a serial port before connecting")
+        clean_baud = int(baud_rate)
+        if clean_baud <= 0:
+            raise ValueError("IMU baud rate must be positive")
+
+        new_source = self._imu_source_factory(clean_port, baud_rate=clean_baud)
+        with self._imu_lock:
+            previous = self._imu_source
+            self._imu_source = new_source
+        if previous is not None:
+            previous.stop()
+        new_source.start()
+        if self._thread is not None and self._thread.is_alive():
+            self._ensure_imu_thread()
+        return new_source.status()
+
+    def disconnect_imu(self) -> dict[str, Any]:
+        if self.recorder.status().active:
+            raise RuntimeError("Stop recording before disconnecting the IMU serial source")
+        with self._imu_lock:
+            source, self._imu_source = self._imu_source, None
+        if source is not None:
+            source.stop()
+        return _empty_imu_status()
+
+    def camera_status(self) -> dict[str, Any]:
+        profile = self._camera_profile_values()
+        return {
+            "profile": self._camera_profile,
+            "width": int(profile["width"]),
+            "height": int(profile["height"]),
+            "fps": float(profile["fps"]),
+            "reconfigurable": callable(getattr(self.camera, "reconfigure", None))
+            and getattr(self.camera, "video_path", None) is None,
+            "available_profiles": {
+                name: {"width": width, "height": height, "fps": fps}
+                for name, (width, height, fps) in CAMERA_PROFILES.items()
+            },
+        }
+
+    def update_camera_profile(self, profile_name: str) -> dict[str, Any]:
+        if self.recorder.status().active:
+            raise RuntimeError("Stop recording before changing the camera profile")
+        with self._lock:
+            current_state = self._status.state
+        if current_state in {"IDLE", "STARTING", "FAILED", "STOPPED"}:
+            raise RuntimeError("Wait for the live camera preview before changing the camera profile")
+        normalized = str(profile_name or "").strip().lower()
+        if normalized not in CAMERA_PROFILES:
+            allowed = ", ".join(sorted(CAMERA_PROFILES))
+            raise ValueError(f"Unsupported camera profile {profile_name!r}; choose {allowed}")
+        reconfigure = getattr(self.camera, "reconfigure", None)
+        if not callable(reconfigure) or getattr(self.camera, "video_path", None) is not None:
+            raise RuntimeError("Camera profiles are unavailable for this camera source")
+
+        width, height, fps = CAMERA_PROFILES[normalized]
+        with self._new_frame:
+            previous_state = self._status.state
+            self._status = RuntimeStatus(
+                **{
+                    **asdict(self._status),
+                    "state": "CAMERA_RESTARTING",
+                    "tracking_valid": False,
+                    "tracking_reason": "changing_camera_profile",
+                    "error": "",
+                }
+            )
+            self._new_frame.notify_all()
+        try:
+            reconfigure(width=width, height=height, fps=fps)
+        except Exception as exc:
+            with self._new_frame:
+                self._status = RuntimeStatus(
+                    **{
+                        **asdict(self._status),
+                        "state": previous_state,
+                        "tracking_reason": "camera_profile_failed",
+                        "error": str(exc),
+                    }
+                )
+                self._new_frame.notify_all()
+            raise RuntimeError(f"Could not apply camera profile {normalized}: {exc}") from exc
+
+        self._camera_profile = normalized
+        self._reset_tracking_event.set()
+        next_state = (
+            "AI_FAILED"
+            if self._pose_failed.is_set()
+            else ("RUNNING" if self._pose_ready.is_set() else "CAMERA_PREVIEW")
+        )
+        next_reason = "pose_model_failed" if self._pose_failed.is_set() else "camera_profile_changed"
+        with self._new_frame:
+            self._status = RuntimeStatus(
+                **{
+                    **asdict(self._status),
+                    "state": next_state,
+                    "source": self.camera.description,
+                    "tracking_reason": next_reason,
+                    "error": self._pose_error if self._pose_failed.is_set() else "",
+                }
+            )
+            self._new_frame.notify_all()
+        return self.camera_status()
+
+    def _camera_profile_values(self) -> dict[str, float | int]:
+        profile_method = getattr(self.camera, "profile", None)
+        if callable(profile_method):
+            return profile_method()
+        return {
+            "width": int(getattr(self.camera, "width", 0) or 0),
+            "height": int(getattr(self.camera, "height", 0) or 0),
+            "fps": float(getattr(self.camera, "fps", 0.0) or 0.0),
+        }
+
+    def _infer_camera_profile(self) -> str:
+        profile = self._camera_profile_values()
+        current = (int(profile["width"]), int(profile["height"]), float(profile["fps"]))
+        for name, values in CAMERA_PROFILES.items():
+            if current == values:
+                return name
+        return "custom"
+
+
+    def _ensure_imu_thread(self) -> None:
+        with self._imu_lock:
+            if self._imu_thread is not None and self._imu_thread.is_alive():
+                return
+            self._imu_thread = threading.Thread(
+                target=self._imu_loop,
+                name="vision-imu-recorder-pump",
+                daemon=True,
+            )
+            self._imu_thread.start()
+
     def start(self) -> None:
         """Start camera preview and pose initialization asynchronously."""
         with self._lock:
@@ -94,15 +272,10 @@ class VisionRuntime:
             self._pose_ready.clear()
             self._pose_failed.clear()
             self._pose_error = ""
-            if self.imu_source is not None:
-                self.imu_source.start()
-                if self._imu_thread is None or not self._imu_thread.is_alive():
-                    self._imu_thread = threading.Thread(
-                        target=self._imu_loop,
-                        name="vision-imu-recorder-pump",
-                        daemon=True,
-                    )
-                    self._imu_thread.start()
+            source = self.imu_source
+            if source is not None:
+                source.start()
+            self._ensure_imu_thread()
             self._status = RuntimeStatus(
                 **{
                     **asdict(self._status),
@@ -124,8 +297,9 @@ class VisionRuntime:
         if thread is not None and thread.is_alive():
             thread.join(timeout=max(0.0, float(timeout_s)))
         self.recorder.close()
-        if self.imu_source is not None:
-            self.imu_source.stop()
+        source = self.imu_source
+        if source is not None:
+            source.stop()
         imu_thread = self._imu_thread
         if imu_thread is not None and imu_thread.is_alive():
             imu_thread.join(timeout=1.0)
@@ -142,27 +316,9 @@ class VisionRuntime:
             payload["tuning"] = self._tuning.to_dict()
             payload["pose_backend"] = getattr(self.estimator, "description", type(self.estimator).__name__)
         payload["recording"] = asdict(self.recorder.status())
-        payload["imu"] = (
-            self.imu_source.status()
-            if self.imu_source is not None
-            else {
-                "configured": False,
-                "connected": False,
-                "capture_active": False,
-                "port": "",
-                "baud_rate": 0,
-                "state": "DISABLED",
-                "sample_rate_hz": 0.0,
-                "sample_count": 0,
-                "parse_errors": 0,
-                "sequence_gaps": 0,
-                "queue_drops": 0,
-                "thigh_ready": False,
-                "shank_ready": False,
-                "last_sample_index": None,
-                "last_error": "",
-            }
-        )
+        source = self.imu_source
+        payload["imu"] = source.status() if source is not None else _empty_imu_status()
+        payload["camera"] = self.camera_status()
         return payload
 
     def tuning(self) -> dict[str, Any]:
@@ -186,26 +342,28 @@ class VisionRuntime:
             tuning["pose_backend"] = getattr(self.estimator, "description", type(self.estimator).__name__)
             source = self.camera.description
             imu_description = ""
-            if self.imu_source is not None:
-                imu_status = self.imu_source.status()
+            imu_source = self.imu_source
+            if imu_source is not None:
+                imu_status = imu_source.status()
                 imu_description = f"{imu_status['port']}@{imu_status['baud_rate']}"
         self.recorder.request_start(
             settings=tuning,
             source=source,
             imu_source=imu_description,
         )
-        if self.imu_source is not None and self.imu_source.configured:
+        if imu_source is not None and imu_source.configured:
             try:
-                self.imu_source.start_capture()
+                imu_source.start_capture()
             except Exception:
                 self.recorder.stop()
                 raise
         return asdict(self.recorder.status())
 
     def stop_recording(self) -> dict[str, Any]:
-        if self.imu_source is not None and self.imu_source.status()["capture_active"]:
+        source = self.imu_source
+        if source is not None and source.status()["capture_active"]:
             try:
-                self.imu_source.stop_capture()
+                source.stop_capture()
             except Exception:
                 pass
         return asdict(self.recorder.stop())
@@ -282,16 +440,19 @@ class VisionRuntime:
             if capture_thread is not None and capture_thread.is_alive():
                 capture_thread.join(timeout=2.0)
             self.recorder.close()
-            if self.imu_source is not None:
-                self.imu_source.stop()
+            source = self.imu_source
+            if source is not None:
+                source.stop()
             self.estimator.close()
             self.camera.close()
 
     def _imu_loop(self) -> None:
-        if self.imu_source is None:
-            return
         while not self._stop_event.is_set():
-            sample = self.imu_source.get_sample(timeout_s=0.1)
+            source = self.imu_source
+            if source is None:
+                time.sleep(0.05)
+                continue
+            sample = source.get_sample(timeout_s=0.1)
             if sample is not None:
                 self.recorder.write_imu(sample)
 
@@ -316,6 +477,16 @@ class VisionRuntime:
                 timestamp_ms = host_monotonic_ns // 1_000_000
                 with self._lock:
                     tuning = self._tuning
+
+                if self._reset_tracking_event.is_set():
+                    self._reset_tracking_event.clear()
+                    active_rotation = None
+                    landmark_filter.reset()
+                    smoothed_angle = None
+                    smoothed_leg = None
+                    reset_tracking = getattr(self.estimator, "reset_tracking", None)
+                    if callable(reset_tracking):
+                        reset_tracking()
 
                 if active_rotation is not tuning.frame_rotation:
                     active_rotation = tuning.frame_rotation
