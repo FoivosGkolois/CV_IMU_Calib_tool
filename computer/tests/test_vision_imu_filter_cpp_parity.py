@@ -136,4 +136,5 @@ int main() {
         ])
 
     for cpp, python in zip(cpp_rows, py_rows, strict=True):
-        assert python == pytest.approx(cpp, abs=2e-5)
+        expected_python = [180.0 - cpp[0], cpp[1], cpp[2], cpp[3]]
+        assert python == pytest.approx(expected_python, abs=2e-5)

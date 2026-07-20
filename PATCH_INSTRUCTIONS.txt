@@ -1,25 +1,27 @@
-Vision-IMU — Standalone runtime/test fix
+Vision-IMU Posterior Angle + Side Swap + Live Arc Patch
 
-ROOT CAUSE
-The calibration tool was being run from a standalone folder rather than the
-complete Thesis_master tree. Three repo-only assumptions remained:
-1. settings/current.yaml had to exist,
-2. STM32 knee_angle.cpp/.h had to exist for the parity test,
-3. Matplotlib tried to open the Tk GUI backend.
+BASELINE
+Standalone tool root:
+C:\Users\phevo\Desktop\CV_IMU_Calib_tool
 
 AFFECTED AREA
-- Knee-filter configuration resolution
-- Headless acquisition plot export
-- Standalone/full-repository test behavior
+- Visual knee-angle geometry
+- IMU knee-angle presentation convention
+- Left/right leg mapping in the standalone vision tool
+- Live overlay rendering
+- Presentation labels and targeted tests
 
-BEHAVIOR AFTER PATCH
-- Explicit --filter-config remains strict.
-- Without --filter-config:
-  1. settings/current.yaml is preferred when present,
-  2. otherwise the bundled Thesis_master(40) parameter snapshot is used.
-- The active configuration path is still displayed and recorded.
-- C++ parity test runs in the full thesis tree and is skipped in a standalone copy.
-- Plot generation uses Matplotlib Agg and does not require Tk/Tkinter.
+WHAT CHANGES
+1. Both visual and IMU angles now use the same convention:
+   - 180 deg = straight leg
+   - smaller angle = more flexion
+   This is the posterior knee angle (the angle behind the knee).
+
+2. Left/right recognition is swapped to match the user's expected convention.
+
+3. The live overlay now draws a colored arc at the knee plus a live numeric angle label.
+
+4. The live chart and GUI labels now refer to the posterior knee angle.
 
 COPY / REPLACE
 Extract this ZIP into:
@@ -30,18 +32,22 @@ No file is deleted.
 
 RUN
 1. 10_TEST_VISION_IMU_PC.bat
-   Expected in the standalone tool:
-   69 passed, 1 skipped
-
 2. 11_RUN_VISION_IMU_SYNC_PC.bat
 
-EXPECTED STARTUP
-The console should print an IMU filter config path ending in:
-computer\vision_imu_calibration\default_knee_filter.yaml
+WHAT TO CHECK ON SCREEN
+- Straight leg should read close to 180 deg.
+- As the knee bends, the displayed angle should decrease.
+- Left/Right labels should now match your expectation.
+- A green arc should appear around the knee with the live angle value.
 
-When the same tool is run from a complete Thesis_master checkout, it should
-instead use:
-settings\current.yaml
+VALIDATION RUN
+- python -m compileall computer/vision_imu_calibration : PASS
+- pytest computer/tests/test_vision_imu_geometry.py computer/tests/test_vision_imu_filter.py computer/tests/test_vision_imu_filter_cpp_parity.py computer/tests/test_vision_imu_presentation.py : 18 passed
+- pytest computer/tests/test_vision_imu_runtime.py computer/tests/test_vision_imu_web_app.py : 11 passed, 1 skipped
+
+MAIN RISK
+The left/right correction is now encoded at the pose-contract level for this standalone tool.
+If you later change camera orientation or move to a different convention, this specific swap point must be reviewed during integration.
 
 GIT COMMIT TITLE
-Make Vision-IMU acquisition tool standalone-safe
+Align Vision-IMU tool to posterior knee-angle convention

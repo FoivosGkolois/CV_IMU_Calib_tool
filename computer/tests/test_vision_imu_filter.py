@@ -74,11 +74,11 @@ def test_explicit_missing_config_is_rejected(tmp_path: Path) -> None:
         resolve_filter_config_path(tmp_path / "missing.yaml")
 
 
-def test_static_straight_pose_returns_zero_flexion() -> None:
+def test_static_straight_pose_returns_one_hundred_eighty_degrees() -> None:
     mirror = KneeAngleFilterMirror(KneeAngleFilterParameters())
     result = mirror.update(sample())
     assert result.valid
-    assert result.knee_angle_deg == pytest.approx(0.0, abs=0.2)
+    assert result.knee_angle_deg == pytest.approx(180.0, abs=0.2)
     assert result.knee_speed_deg_s == pytest.approx(0.0)
 
 
@@ -89,7 +89,7 @@ def test_known_relative_accelerometer_pose_returns_ninety_degrees() -> None:
     assert result.knee_angle_deg == pytest.approx(90.0, abs=0.2)
 
 
-def test_gyro_integration_matches_filter_convention() -> None:
+def test_gyro_integration_updates_the_new_angle_convention() -> None:
     params = KneeAngleFilterParameters(
         alpha_stable=1.0,
         alpha_dynamic=1.0,
@@ -101,7 +101,7 @@ def test_gyro_integration_matches_filter_convention() -> None:
         sample(index=2, timestamp_us=20_000, shank_gyro=(100.0, 0.0, 0.0))
     )
     assert result.valid
-    assert result.knee_angle_deg == pytest.approx(1.0, abs=0.02)
+    assert result.knee_angle_deg == pytest.approx(179.0, abs=0.02)
     assert result.knee_speed_deg_s == pytest.approx(-100.0, abs=0.02)
 
 

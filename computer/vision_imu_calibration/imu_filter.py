@@ -164,10 +164,11 @@ class KneeAngleEstimate:
 
 
 class KneeAngleFilterMirror:
-    """Stateful Python mirror of STM32 ``knee_angle.cpp``.
+    """Stateful Python mirror of the knee-angle estimator adapted for the standalone calibration tool.
 
     This module performs acquisition-time estimation only. It does not search,
-    score, tune, or recommend parameters.
+    score, tune, or recommend parameters. The presentation convention is:
+    180 deg = straight leg, smaller angle = more flexion.
     """
 
     implementation_id = "stm32_knee_angle_cpp_mirror_v1"
@@ -242,10 +243,11 @@ class KneeAngleFilterMirror:
                 wrapped_relative,
                 self._unwrapped_relative_angle_deg,
             )
-        knee_angle_deg = (
+        flexion_angle_deg = (
             p.relative_angle_sign * self._unwrapped_relative_angle_deg
             - p.straight_leg_offset_deg
         )
+        knee_angle_deg = 180.0 - flexion_angle_deg
 
         values = (knee_angle_deg, knee_speed_deg_s, thigh_angle_deg, shank_angle_deg)
         if not all(math.isfinite(value) for value in values):

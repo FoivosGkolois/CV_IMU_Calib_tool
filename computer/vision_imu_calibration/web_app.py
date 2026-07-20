@@ -64,25 +64,25 @@ footer { max-width:1400px; margin:0 auto; padding:0 18px 18px; color:#73849c; fo
 <section class="left-stack">
   <div class="video-shell"><img id="videoStream" src="/video.mjpg" alt="Live annotated camera stream"></div>
   <div class="chart-card">
-    <div class="label">Live knee-angle presentation · last 15 s</div>
-    <div class="note">Blue: visual reference · Green: current STM32-equivalent IMU filter output. This is presentation only; no scoring or parameter recommendation is performed.</div>
+    <div class="label">Live posterior knee-angle presentation · last 15 s</div>
+    <div class="note">Blue: visual posterior-knee-angle reference · Green: current IMU posterior-knee-angle estimate. This is presentation only; no scoring or parameter recommendation is performed.</div>
     <div class="chart-shell"><canvas id="angleChart"></canvas></div>
   </div>
 </section>
 <aside class="panel">
 <div class="card"><div class="label">Tracking</div><div id="tracking" class="value">Starting…</div><div id="reason" class="small">Initializing camera and pose model</div></div>
-<div class="card"><div class="label">Visual knee flexion</div><div id="angle" class="value">--.-°</div><div id="rawAngle" class="small">Raw: --.-°</div></div>
+<div class="card"><div class="label">Visual posterior knee angle</div><div id="angle" class="value">--.-°</div><div id="rawAngle" class="small">Raw: --.-°</div></div>
 <div class="card"><div class="label">Pose confidence</div><div id="confidence" class="value">0.00</div></div>
 <div class="card">
-  <div class="label">Current IMU knee-angle estimator</div>
+  <div class="label">Current IMU posterior-knee-angle estimator</div>
   <div id="imuEstimatorState" class="value small">NO SAMPLE</div>
   <div class="metric-grid">
-    <div class="metric"><div class="name">IMU flexion</div><div id="imuAngle" class="number">--.-°</div></div>
+    <div class="metric"><div class="name">IMU angle</div><div id="imuAngle" class="number">--.-°</div></div>
     <div class="metric"><div class="name">Visual − IMU</div><div id="angleDifference" class="number">--.-°</div></div>
     <div class="metric"><div class="name">Knee speed</div><div id="imuSpeed" class="number">--.-°/s</div></div>
     <div class="metric"><div class="name">Thigh / Shank</div><div id="segmentAngles" class="number">--.- / --.-°</div></div>
   </div>
-  <button id="reloadImuFilter" class="primary" style="margin-top:10px" onclick="reloadFilterConfig()">Reload settings/current.yaml</button>
+  <button id="reloadImuFilter" class="primary" style="margin-top:10px" onclick="reloadFilterConfig()">Reload IMU filter config</button>
   <div id="imuFilterInfo" class="note">Waiting for synchronized raw IMU samples.</div>
 </div>
 <div class="card"><div class="label">Inference rate</div><div id="fps" class="value">0.0 FPS</div></div>
@@ -117,7 +117,7 @@ footer { max-width:1400px; margin:0 auto; padding:0 18px 18px; color:#73849c; fo
     <div class="control-row">
       <div class="control-head"><span>Tracked leg</span></div>
       <select id="legSide"><option value="auto">Auto</option><option value="left">Left</option><option value="right">Right</option></select>
-      <div class="control-help"><b>Auto:</b> διαλέγει το πιο βέβαιο πόδι αλλά μπορεί να αλλάξει πλευρά. <b>Left/Right:</b> κλειδώνει το κοντινό στην κάμερα πόδι.</div>
+      <div class="control-help"><b>Auto:</b> διαλέγει το πιο βέβαιο πόδι αλλά μπορεί να αλλάξει πλευρά. <b>Left/Right:</b> κλειδώνει το αναγνωρισμένο κοντινό στην κάμερα πόδι με τη διορθωμένη convention αριστερού/δεξιού.</div>
     </div>
     <div class="control-row">
       <div class="control-head"><span>Frame rotation</span></div>
@@ -297,7 +297,7 @@ function drawAngleChart(rows){
   angleChart.width=Math.floor(width*dpr); angleChart.height=Math.floor(height*dpr);
   const ctx=angleChart.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,width,height);
   ctx.fillStyle='#0a101a'; ctx.fillRect(0,0,width,height);
-  if(!rows||rows.length<2){ ctx.fillStyle='#91a4bf'; ctx.font='13px Segoe UI'; ctx.fillText('Waiting for camera and IMU samples…',16,28); return; }
+  if(!rows||rows.length<2){ ctx.fillStyle='#91a4bf'; ctx.font='13px Segoe UI'; ctx.fillText('Waiting for camera and IMU angle samples…',16,28); return; }
   const values=[]; for(const row of rows){ if(row.visual_knee_angle_deg!==null&&Number.isFinite(Number(row.visual_knee_angle_deg))) values.push(Number(row.visual_knee_angle_deg)); if(row.imu_knee_angle_deg!==null&&Number.isFinite(Number(row.imu_knee_angle_deg))) values.push(Number(row.imu_knee_angle_deg)); }
   if(!values.length) return;
   let min=Math.min(...values), max=Math.max(...values); if(max-min<20){ const mid=(max+min)/2; min=mid-10; max=mid+10; }

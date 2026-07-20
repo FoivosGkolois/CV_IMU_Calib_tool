@@ -55,7 +55,7 @@ class PoseFrame:
         return self._leg_for_side(requested_side)
 
     def _leg_for_side(self, side: LegSide) -> LegLandmarks | None:
-        prefix = side.value
+        prefix = self._source_prefix_for_side(side)
         try:
             return LegLandmarks(
                 side=side,
@@ -65,3 +65,17 @@ class PoseFrame:
             )
         except KeyError:
             return None
+
+    @staticmethod
+    def _source_prefix_for_side(side: LegSide) -> str:
+        """Return the pose-backend prefix for the user-facing leg side.
+
+        The current camera presentation in this standalone tool requires a left/right
+        swap to match the user's expected side labels. Keeping the swap localized here
+        avoids touching the rest of the runtime contract.
+        """
+        if side is LegSide.LEFT:
+            return "right"
+        if side is LegSide.RIGHT:
+            return "left"
+        raise ValueError("AUTO has no direct landmark prefix")

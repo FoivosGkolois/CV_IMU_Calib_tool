@@ -24,13 +24,13 @@ def leg(
     )
 
 
-def test_straight_leg_is_zero_flexion() -> None:
+def test_straight_leg_is_one_hundred_eighty_degrees() -> None:
     result = calculate_knee_flexion_deg(leg((0.5, 0.2), (0.5, 0.5), (0.5, 0.8)))
     assert result.valid
-    assert result.angle_deg == pytest.approx(0.0, abs=1e-9)
+    assert result.angle_deg == pytest.approx(180.0, abs=1e-9)
 
 
-def test_right_angle_is_ninety_degrees_flexion() -> None:
+def test_right_angle_is_ninety_degrees() -> None:
     result = calculate_knee_flexion_deg(leg((0.5, 0.2), (0.5, 0.5), (0.8, 0.5)))
     assert result.valid
     assert result.angle_deg == pytest.approx(90.0, abs=1e-9)
@@ -63,7 +63,7 @@ def test_missing_pose_is_rejected() -> None:
     assert result.reason == "pose_missing"
 
 
-def test_auto_leg_selects_higher_confidence_chain() -> None:
+def test_auto_leg_selects_higher_confidence_chain_after_side_swap() -> None:
     pose = PoseFrame(
         timestamp_ms=1,
         landmarks={
@@ -77,11 +77,28 @@ def test_auto_leg_selects_higher_confidence_chain() -> None:
     )
     selected = pose.leg(LegSide.AUTO)
     assert selected is not None
-    assert selected.side is LegSide.RIGHT
+    assert selected.side is LegSide.LEFT
+
+
+def test_explicit_left_side_uses_swapped_landmarks() -> None:
+    pose = PoseFrame(
+        timestamp_ms=1,
+        landmarks={
+            "left_hip": landmark(0.2, 0.2, 0.7),
+            "left_knee": landmark(0.2, 0.5, 0.7),
+            "left_ankle": landmark(0.2, 0.8, 0.7),
+            "right_hip": landmark(0.8, 0.2, 0.95),
+            "right_knee": landmark(0.8, 0.5, 0.95),
+            "right_ankle": landmark(0.8, 0.8, 0.95),
+        },
+    )
+    selected = pose.leg(LegSide.LEFT)
+    assert selected is not None
+    assert selected.knee.x == pytest.approx(0.8)
 
 
 def test_angle_is_clamped_to_physical_range() -> None:
     result = calculate_knee_flexion_deg(leg((0.5, 0.2), (0.5, 0.5), (0.5, 0.2)))
     assert result.valid
-    assert result.angle_deg == pytest.approx(180.0)
+    assert result.angle_deg == pytest.approx(0.0)
     assert 0.0 <= result.angle_deg <= 180.0

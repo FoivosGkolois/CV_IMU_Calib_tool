@@ -226,3 +226,13 @@ At startup it resolves the knee-angle filter configuration in this order:
 The active path is printed in the console and stored with the acquisition metadata.
 The C++ parity test runs only when the STM32 source tree is available. Plot export uses
 the non-interactive Matplotlib `Agg` backend and does not require Tk/Tkinter.
+
+
+## Angle convention
+
+Both the visual estimator and the IMU estimator now use the same posterior-knee-angle convention:
+
+- **180°** = straight leg
+- **smaller angle** = more knee flexion
+
+The visual overlay also draws a live colored arc behind the knee.

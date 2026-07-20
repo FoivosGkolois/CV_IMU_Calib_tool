@@ -20,10 +20,14 @@ def calculate_knee_flexion_deg(
     confidence_threshold: float = 0.55,
     min_segment_length: float = 0.025,
 ) -> KneeAngleResult:
-    """Calculate sagittal-plane knee flexion from normalized 2-D landmarks.
+    """Calculate the posterior knee angle from normalized 2-D landmarks.
 
-    The convention is 0 degrees for a straight leg and positive flexion.
+    Convention:
+    - 180 degrees: straight leg
+    - smaller angle: more flexion
+
     The result is an external visual reference, not a clinical 3-D angle.
+    The function name is preserved for compatibility with the existing tool.
     """
     if leg is None:
         return KneeAngleResult(None, False, 0.0, "pose_missing")
@@ -41,6 +45,6 @@ def calculate_knee_flexion_deg(
 
     cosine = (thigh[0] * shank[0] + thigh[1] * shank[1]) / (thigh_length * shank_length)
     cosine = max(-1.0, min(1.0, cosine))
-    included_angle_deg = math.degrees(math.acos(cosine))
-    flexion_deg = max(0.0, min(180.0, 180.0 - included_angle_deg))
-    return KneeAngleResult(flexion_deg, True, confidence, "ok")
+    posterior_angle_deg = math.degrees(math.acos(cosine))
+    posterior_angle_deg = max(0.0, min(180.0, posterior_angle_deg))
+    return KneeAngleResult(posterior_angle_deg, True, confidence, "ok")
