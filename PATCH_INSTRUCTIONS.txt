@@ -1,19 +1,28 @@
-Vision-IMU manual COM connection and camera profile patch
+Vision-IMU — Complete acquisition and presentation stage patch
 
 BASELINE
-Current Thesis_master after applying the Dual-IMU Sync and Fast Webcam Initialization patches.
+Thesis_master(40), branch master_2, HEAD f738a96, with the previously delivered
+Vision-IMU patches applied through:
+- Dual-IMU synchronized capture
+- Fast webcam initialization
+- Manual COM connection and camera quality profiles
+
+OBJECTIVE
+Complete every deterministic stage before the future parameter-analysis layer:
+raw acquisition, current-filter estimation, synchronization, recording, live
+presentation, and descriptive evidence export.
 
 AFFECTED AREA
-- PC calibration web UI
-- Standalone UNO R4 serial connection lifecycle
-- Live camera profile switching
-- Setup/test launchers and targeted tests
+- PC Vision-IMU calibration application only
+- Host-side mirror of the current STM32 knee-angle estimator
+- Trial recording, synchronization, presentation, and tests
 
 UNCHANGED
-- UNO R4 IMUCAL firmware protocol
-- Production serial TELEM
-- STM32 production firmware
-- Motor, safety, control, estimator, and logger contracts
+- Standalone UNO R4 IMUCAL sketch and frame schema
+- Production STM32 firmware
+- Production TELEM and serial GUI parser
+- Motor, SimpleFOC, safety, assistance, and control paths
+- No parameter search, score, optimization, or recommendation YAML
 
 COPY / REPLACE
 Extract this ZIP into the current Thesis_master root.
@@ -21,10 +30,10 @@ Keep the folder structure and replace matching files.
 No file is deleted.
 
 REQUIRED RUN ORDER
-1. Run 08_SETUP_VISION_IMU_PC.bat once.
-   This installs/verifies pyserial inside .venv-vision.
+1. Run 08_SETUP_VISION_IMU_PC.bat once again.
+   This adds PyYAML and Matplotlib to the isolated .venv-vision environment.
 2. Run 10_TEST_VISION_IMU_PC.bat.
-3. Upload the standalone UNO R4 sketch:
+3. Upload the existing standalone UNO R4 sketch:
    standalone_tools/vision_imu_calibration/arduino/uno_r4_dual_imu_stream/uno_r4_dual_imu_stream.ino
 4. Close Arduino Serial Monitor.
 5. Run 11_RUN_VISION_IMU_SYNC_PC.bat.
@@ -32,17 +41,47 @@ REQUIRED RUN ORDER
    - press Refresh under UNO R4 raw IMU stream,
    - select the UNO R4 COM port,
    - press Connect,
-   - wait for CONNECTED and both sensors READY.
+   - wait for CONNECTED, both sensors READY, and IMU estimator VALID.
+7. Select the camera-near leg explicitly.
+8. Record 5 seconds stationary plus five slow flexion-extension cycles.
+9. Press Stop and inspect the generated session folder.
 
-CAMERA PROFILE
-- Fast: 640x480, quicker startup and lower load.
-- Quality: 1280x720, more source detail and potentially better tracking at difficult angles.
-- Stop recording before changing profile.
+NEW LIVE PRESENTATION
+- Current visual knee flexion
+- Current STM32-equivalent IMU knee flexion
+- Current IMU knee speed
+- Filtered thigh and shank orientations
+- Visual minus IMU instantaneous difference
+- Rolling 15-second visual/IMU plot
+- Active estimator parameters loaded from settings/current.yaml
+- Reload button for settings/current.yaml while idle
 
-SAFETY / DATA RULES
-- COM connect/disconnect is blocked while recording.
-- Camera profile changes are blocked while recording.
-- Existing IMUCAL frame schema is unchanged.
+NEW TRIAL OUTPUTS
+vision_calibration_recordings/vision_imu_session_<timestamp>/
+- annotated_pose.mp4 or .avi
+- pose_timeline.csv
+- raw_imu.csv
+- imu_estimator_timeline.csv
+- synchronized_timeline.csv
+- acquisition_summary.json
+- acquisition_overview.png
+- recording_metadata.json
+
+SCOPE BOUNDARY
+The patch presents and records the current filter output. It does not decide
+whether one parameter set is better, compute an optimization score, search
+candidate values, or generate recommendations.
+
+HARDWARE ACCEPTANCE
+- both IMUs READY
+- approximately 100 Hz IMU stream
+- estimator VALID after connection
+- parse errors = 0
+- queue drops = 0
+- no unexplained sample-index gaps
+- visual tracking valid during controlled side-view motion
+- synchronized_timeline.csv contains raw and processed IMU fields
+- acquisition_overview.png is generated after Stop
 
 GIT COMMIT TITLE
-Add manual IMU connection and camera quality profiles
+Complete Vision-IMU acquisition and presentation stage

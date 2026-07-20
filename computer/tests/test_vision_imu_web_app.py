@@ -69,3 +69,22 @@ def test_manual_imu_and_camera_profile_endpoints() -> None:
     disconnected = client.post("/api/imu/disconnect")
     assert disconnected.status_code == 200
     assert runtime.connected is None
+
+
+def test_filter_reload_and_history_endpoints() -> None:
+    class ExtendedRuntime(FakeRuntime):
+        def reload_imu_filter(self):
+            return {"valid": False, "reason": "filter_reloaded"}
+
+        def acquisition_history(self, *, seconds: float, max_points: int):
+            return [{"host_monotonic_ns": 1, "visual_valid": True, "imu_valid": True}]
+
+    runtime = ExtendedRuntime()
+    app = create_app(runtime)  # type: ignore[arg-type]
+    client = app.test_client()
+    reload_response = client.post("/api/imu-filter/reload")
+    assert reload_response.status_code == 200
+    assert reload_response.get_json()["reason"] == "filter_reloaded"
+    history = client.get("/api/acquisition/history?seconds=10&max_points=50")
+    assert history.status_code == 200
+    assert history.get_json()["rows"][0]["host_monotonic_ns"] == 1

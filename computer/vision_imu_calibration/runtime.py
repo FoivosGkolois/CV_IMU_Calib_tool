@@ -2,12 +2,18 @@ from __future__ import annotations
 
 import threading
 import time
+from collections import deque
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
 from .camera_source import OpenCvCameraSource
 from .geometry import KneeAngleResult, calculate_knee_flexion_deg
+from .imu_filter import (
+    KneeAngleEstimate,
+    KneeAngleFilterMirror,
+    KneeAngleFilterParameters,
+)
 from .imu_serial import IMUCAL_BAUD_RATE, SerialImuSource, list_serial_ports
 from .landmark_filter import LegLandmarkEmaFilter
 from .models import LegSide
@@ -77,6 +83,8 @@ class VisionRuntime:
         recording_root: str | Path = "vision_calibration_recordings",
         imu_source: SerialImuSource | None = None,
         imu_source_factory: Any = SerialImuSource,
+        imu_filter: KneeAngleFilterMirror | None = None,
+        imu_filter_config_path: str | Path | None = None,
     ) -> None:
         self.camera = camera
         self.estimator = estimator
@@ -88,6 +96,13 @@ class VisionRuntime:
         self._imu_source = imu_source
         self._imu_source_factory = imu_source_factory
         self._imu_lock = threading.RLock()
+        self._imu_filter_lock = threading.RLock()
+        self._imu_filter_config_path = (
+            Path(imu_filter_config_path).resolve() if imu_filter_config_path is not None else None
+        )
+        self._imu_filter = imu_filter or KneeAngleFilterMirror(KneeAngleFilterParameters())
+        self._latest_imu_estimate = KneeAngleEstimate()
+        self._acquisition_history: deque[dict[str, Any]] = deque(maxlen=1200)
         self._lock = threading.RLock()
         self._new_frame = threading.Condition(self._lock)
         self._stop_event = threading.Event()
@@ -140,7 +155,25 @@ class VisionRuntime:
             self._imu_source = new_source
         if previous is not None:
             previous.stop()
+        self._reset_imu_estimator("connecting")
         new_source.start()
+        wait_until_connected = getattr(new_source, "wait_until_connected", None)
+        if callable(wait_until_connected) and not wait_until_connected(timeout_s=5.0):
+            new_source.stop()
+            with self._imu_lock:
+                if self._imu_source is new_source:
+                    self._imu_source = None
+            raise RuntimeError(f"UNO R4 did not answer on {clean_port} within 5 seconds")
+        start_capture = getattr(new_source, "start_capture", None)
+        if callable(start_capture):
+            try:
+                start_capture(timeout_s=2.0)
+            except Exception:
+                new_source.stop()
+                with self._imu_lock:
+                    if self._imu_source is new_source:
+                        self._imu_source = None
+                raise
         if self._thread is not None and self._thread.is_alive():
             self._ensure_imu_thread()
         return new_source.status()
@@ -152,7 +185,54 @@ class VisionRuntime:
             source, self._imu_source = self._imu_source, None
         if source is not None:
             source.stop()
+        self._reset_imu_estimator("disconnected")
         return _empty_imu_status()
+
+    def reload_imu_filter(self) -> dict[str, Any]:
+        if self.recorder.status().active:
+            raise RuntimeError("Stop recording before reloading the IMU filter configuration")
+        if self._imu_filter_config_path is None:
+            raise RuntimeError("No IMU filter configuration path was provided")
+        parameters = KneeAngleFilterParameters.load_yaml(self._imu_filter_config_path)
+        with self._imu_filter_lock:
+            self._imu_filter = KneeAngleFilterMirror(parameters)
+            self._latest_imu_estimate = KneeAngleEstimate(reason="filter_reloaded")
+            self._acquisition_history.clear()
+        return self.imu_estimator_status()
+
+    def imu_estimator_status(self) -> dict[str, Any]:
+        with self._imu_filter_lock:
+            estimate = self._latest_imu_estimate
+            parameters = self._imu_filter.parameters
+        payload = estimate.to_record()
+        payload.update(
+            {
+                "valid": estimate.valid,
+                "reason": estimate.reason,
+                "implementation_id": self._imu_filter.implementation_id,
+                "config_path": str(self._imu_filter_config_path or ""),
+                "parameters": parameters.to_dict(),
+            }
+        )
+        return payload
+
+    def acquisition_history(self, *, seconds: float = 15.0, max_points: int = 300) -> list[dict[str, Any]]:
+        seconds = max(1.0, min(120.0, float(seconds)))
+        max_points = max(10, min(1000, int(max_points)))
+        cutoff_ns = time.perf_counter_ns() - int(seconds * 1_000_000_000)
+        with self._imu_filter_lock:
+            rows = [row for row in self._acquisition_history if row["host_monotonic_ns"] >= cutoff_ns]
+        if len(rows) <= max_points:
+            return rows
+        step = max(1, len(rows) // max_points)
+        sampled = rows[::step]
+        return sampled[-max_points:]
+
+    def _reset_imu_estimator(self, reason: str) -> None:
+        with self._imu_filter_lock:
+            self._imu_filter.reset()
+            self._latest_imu_estimate = KneeAngleEstimate(reason=reason)
+            self._acquisition_history.clear()
 
     def camera_status(self) -> dict[str, Any]:
         profile = self._camera_profile_values()
@@ -263,6 +343,17 @@ class VisionRuntime:
             )
             self._imu_thread.start()
 
+    def _activate_existing_imu_source(self, source: SerialImuSource) -> None:
+        try:
+            wait_until_connected = getattr(source, "wait_until_connected", None)
+            if callable(wait_until_connected) and not wait_until_connected(timeout_s=5.0):
+                return
+            start_capture = getattr(source, "start_capture", None)
+            if callable(start_capture) and not bool(source.status().get("capture_active")):
+                start_capture(timeout_s=2.0)
+        except Exception:
+            return
+
     def start(self) -> None:
         """Start camera preview and pose initialization asynchronously."""
         with self._lock:
@@ -275,6 +366,12 @@ class VisionRuntime:
             source = self.imu_source
             if source is not None:
                 source.start()
+                threading.Thread(
+                    target=self._activate_existing_imu_source,
+                    args=(source,),
+                    name="vision-imu-serial-activate",
+                    daemon=True,
+                ).start()
             self._ensure_imu_thread()
             self._status = RuntimeStatus(
                 **{
@@ -318,6 +415,7 @@ class VisionRuntime:
         payload["recording"] = asdict(self.recorder.status())
         source = self.imu_source
         payload["imu"] = source.status() if source is not None else _empty_imu_status()
+        payload["imu_estimator"] = self.imu_estimator_status()
         payload["camera"] = self.camera_status()
         return payload
 
@@ -346,26 +444,23 @@ class VisionRuntime:
             if imu_source is not None:
                 imu_status = imu_source.status()
                 imu_description = f"{imu_status['port']}@{imu_status['baud_rate']}"
+        tuning["imu_filter"] = self.imu_estimator_status()
         self.recorder.request_start(
             settings=tuning,
             source=source,
             imu_source=imu_description,
         )
         if imu_source is not None and imu_source.configured:
-            try:
-                imu_source.start_capture()
-            except Exception:
-                self.recorder.stop()
-                raise
+            imu_status = imu_source.status()
+            if not imu_status.get("capture_active"):
+                try:
+                    imu_source.start_capture()
+                except Exception:
+                    self.recorder.stop()
+                    raise
         return asdict(self.recorder.status())
 
     def stop_recording(self) -> dict[str, Any]:
-        source = self.imu_source
-        if source is not None and source.status()["capture_active"]:
-            try:
-                source.stop_capture()
-            except Exception:
-                pass
         return asdict(self.recorder.stop())
 
     def wait_for_jpeg(self, after_sequence: int, timeout_s: float = 1.0) -> tuple[int, bytes | None]:
@@ -453,8 +548,12 @@ class VisionRuntime:
                 time.sleep(0.05)
                 continue
             sample = source.get_sample(timeout_s=0.1)
-            if sample is not None:
-                self.recorder.write_imu(sample)
+            if sample is None:
+                continue
+            with self._imu_filter_lock:
+                estimate = self._imu_filter.update(sample)
+                self._latest_imu_estimate = estimate
+            self.recorder.write_imu(sample, estimate=estimate)
 
     def _capture_loop(self) -> None:
         cv2 = self._load_cv2()
@@ -579,6 +678,16 @@ class VisionRuntime:
                     continue
 
                 frame_index += 1
+                with self._imu_filter_lock:
+                    imu_estimate = self._latest_imu_estimate
+                difference_deg = None
+                if (
+                    filtered_angle.valid
+                    and filtered_angle.angle_deg is not None
+                    and imu_estimate.valid
+                    and imu_estimate.knee_angle_deg is not None
+                ):
+                    difference_deg = float(filtered_angle.angle_deg) - float(imu_estimate.knee_angle_deg)
                 sample = {
                     "host_monotonic_ns": host_monotonic_ns,
                     "frame_index": frame_index,
@@ -595,7 +704,22 @@ class VisionRuntime:
                     "knee_y": leg.knee.y if leg is not None else None,
                     "ankle_x": leg.ankle.x if leg is not None else None,
                     "ankle_y": leg.ankle.y if leg is not None else None,
+                    "live_imu_filter_valid": imu_estimate.valid,
+                    "live_imu_knee_angle_deg": imu_estimate.knee_angle_deg,
+                    "live_imu_knee_speed_deg_s": imu_estimate.knee_speed_deg_s,
+                    "live_angle_difference_deg": difference_deg,
                 }
+                with self._imu_filter_lock:
+                    self._acquisition_history.append(
+                        {
+                            "host_monotonic_ns": host_monotonic_ns,
+                            "visual_knee_angle_deg": filtered_angle.angle_deg,
+                            "visual_valid": filtered_angle.valid,
+                            "imu_knee_angle_deg": imu_estimate.knee_angle_deg,
+                            "imu_valid": imu_estimate.valid,
+                            "angle_difference_deg": difference_deg,
+                        }
+                    )
                 self.recorder.write(annotated, preferred_fps=ema_fps or 15.0, sample=sample)
 
                 if self._pose_failed.is_set():

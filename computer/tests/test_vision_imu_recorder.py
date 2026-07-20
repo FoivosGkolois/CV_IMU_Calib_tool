@@ -187,3 +187,71 @@ def test_recorder_writes_raw_imu_and_builds_synchronized_timeline(
     synchronized = Path(status.synchronized_csv_path).read_text(encoding="utf-8")
     assert "sync_delta_ms" in synchronized
     assert "imu_sample_index" in synchronized
+
+
+def test_recorder_separates_raw_and_processed_imu_outputs(tmp_path: Path, monkeypatch) -> None:
+    from computer.vision_imu_calibration.imu_filter import KneeAngleEstimate
+    from computer.vision_imu_calibration.imu_serial import ImuCalibrationSample
+
+    fake_cv2 = FakeCv2()
+    monkeypatch.setattr("computer.vision_imu_calibration.recorder._load_cv2", lambda: fake_cv2)
+    clock = {"now_ns": 3_000_000_000}
+    monkeypatch.setattr(
+        "computer.vision_imu_calibration.recorder.time.perf_counter_ns",
+        lambda: clock["now_ns"],
+    )
+    recorder = AnnotatedVideoRecorder(tmp_path)
+    recorder.request_start(settings={"imu_filter": {"implementation_id": "test"}}, source="camera:0")
+    frame = np.zeros((120, 160, 3), dtype=np.uint8)
+    recorder.write(
+        frame,
+        preferred_fps=10.0,
+        sample={
+            "host_monotonic_ns": 3_010_000_000,
+            "frame_index": 1,
+            "visual_knee_angle_deg": 25.0,
+            "tracking_valid": True,
+        },
+    )
+    raw = ImuCalibrationSample(
+        host_monotonic_ns=3_011_000_000,
+        schema_version=1,
+        sample_index=4,
+        mcu_timestamp_us=40_000,
+        thigh_ok=True,
+        shank_ok=True,
+        thigh_ax_raw=0,
+        thigh_ay_raw=0,
+        thigh_az_raw=16384,
+        thigh_gx_raw=0,
+        thigh_gy_raw=0,
+        thigh_gz_raw=0,
+        shank_ax_raw=0,
+        shank_ay_raw=-8000,
+        shank_az_raw=14000,
+        shank_gx_raw=0,
+        shank_gy_raw=0,
+        shank_gz_raw=0,
+    )
+    estimate = KneeAngleEstimate(
+        host_monotonic_ns=3_011_000_000,
+        sample_index=4,
+        mcu_timestamp_us=40_000,
+        valid=True,
+        knee_angle_deg=24.0,
+        knee_speed_deg_s=-2.0,
+        thigh_angle_deg=0.0,
+        shank_angle_deg=24.0,
+        reason="ok",
+    )
+    recorder.write_imu(raw, estimate=estimate)
+    clock["now_ns"] = 3_020_000_000
+    status = recorder.stop()
+    assert status.estimator_sample_count == 1
+    assert Path(status.estimator_csv_path).is_file()
+    assert Path(status.summary_path).is_file()
+    assert Path(status.overview_plot_path).is_file()
+    estimator_text = Path(status.estimator_csv_path).read_text(encoding="utf-8")
+    assert "knee_angle_deg" in estimator_text
+    synchronized = Path(status.synchronized_csv_path).read_text(encoding="utf-8")
+    assert "estimator_knee_angle_deg" in synchronized

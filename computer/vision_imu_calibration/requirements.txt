@@ -4,3 +4,5 @@ opencv-python>=4.10,<5
 numpy>=1.26,<3
 pytest>=8.3,<9
 pyserial>=3.5,<4
+PyYAML>=6.0,<7
+matplotlib>=3.9,<4

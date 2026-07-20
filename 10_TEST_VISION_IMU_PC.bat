@@ -29,7 +29,10 @@ echo.
     "computer\tests\test_vision_imu_recorder.py" ^
     "computer\tests\test_vision_imu_movenet.py" ^
     "computer\tests\test_vision_imu_serial_protocol.py" ^
+    "computer\tests\test_vision_imu_filter.py" ^
+    "computer\tests\test_vision_imu_filter_cpp_parity.py" ^
     "computer\tests\test_vision_imu_synchronization.py" ^
+    "computer\tests\test_vision_imu_presentation.py" ^
     "computer\tests\test_vision_imu_web_app.py" ^
     -q
 set "TEST_EXIT_CODE=%ERRORLEVEL%"

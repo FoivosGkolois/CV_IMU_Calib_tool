@@ -278,3 +278,95 @@ def test_runtime_camera_profile_changes_live_source_settings(tmp_path: Path) -> 
     assert result["width"] == 1280
     assert result["height"] == 720
     assert result["fps"] == 30.0
+
+
+class StreamingManualImuSource(ManualImuSource):
+    def wait_until_connected(self, timeout_s: float = 3.0) -> bool:
+        return self.started and not self.stopped
+
+    def start_capture(self, timeout_s: float = 1.5) -> None:
+        self.capture_active = True
+
+
+def test_manual_connect_starts_continuous_calibration_stream(tmp_path: Path) -> None:
+    StreamingManualImuSource.instances.clear()
+    runtime = VisionRuntime(
+        PreviewCamera(),
+        FakeEstimator(),
+        recording_root=tmp_path,
+        imu_source_factory=StreamingManualImuSource,
+    )  # type: ignore[arg-type]
+    status = runtime.connect_imu("COM8")
+    assert status["capture_active"] is True
+    runtime.disconnect_imu()
+
+
+def test_acquisition_history_is_bounded_and_decimated(tmp_path: Path) -> None:
+    runtime = VisionRuntime(PreviewCamera(), FakeEstimator(), recording_root=tmp_path)  # type: ignore[arg-type]
+    now = time.perf_counter_ns()
+    with runtime._imu_filter_lock:
+        for index in range(100):
+            runtime._acquisition_history.append(
+                {
+                    "host_monotonic_ns": now - (99 - index) * 10_000_000,
+                    "visual_knee_angle_deg": float(index),
+                    "visual_valid": True,
+                    "imu_knee_angle_deg": float(index - 1),
+                    "imu_valid": True,
+                    "angle_difference_deg": 1.0,
+                }
+            )
+    rows = runtime.acquisition_history(seconds=2.0, max_points=20)
+    assert len(rows) <= 20
+    assert rows[-1]["angle_difference_deg"] == 1.0
+
+
+def test_imu_loop_updates_live_filter_estimate(tmp_path: Path) -> None:
+    from computer.vision_imu_calibration.imu_serial import ImuCalibrationSample
+
+    class OneSampleSource:
+        def __init__(self) -> None:
+            self.sent = False
+
+        def get_sample(self, timeout_s: float = 0.1):
+            if self.sent:
+                time.sleep(0.01)
+                return None
+            self.sent = True
+            return ImuCalibrationSample(
+                host_monotonic_ns=1_000_000_000,
+                schema_version=1,
+                sample_index=1,
+                mcu_timestamp_us=10_000,
+                thigh_ok=True,
+                shank_ok=True,
+                thigh_ax_raw=0,
+                thigh_ay_raw=0,
+                thigh_az_raw=16393,
+                thigh_gx_raw=0,
+                thigh_gy_raw=0,
+                thigh_gz_raw=0,
+                shank_ax_raw=0,
+                shank_ay_raw=-16393,
+                shank_az_raw=0,
+                shank_gx_raw=0,
+                shank_gy_raw=0,
+                shank_gz_raw=0,
+            )
+
+        def status(self):
+            return {"configured": True, "capture_active": True}
+
+    runtime = VisionRuntime(PreviewCamera(), FakeEstimator(), recording_root=tmp_path)  # type: ignore[arg-type]
+    with runtime._imu_lock:
+        runtime._imu_source = OneSampleSource()  # type: ignore[assignment]
+    thread = threading.Thread(target=runtime._imu_loop)
+    thread.start()
+    deadline = time.monotonic() + 1.0
+    while time.monotonic() < deadline and not runtime.imu_estimator_status()["valid"]:
+        time.sleep(0.01)
+    runtime._stop_event.set()
+    thread.join(timeout=1.0)
+    status = runtime.imu_estimator_status()
+    assert status["valid"] is True
+    assert status["knee_angle_deg"] == pytest.approx(90.0, abs=0.2)

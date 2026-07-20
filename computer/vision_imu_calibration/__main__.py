@@ -9,6 +9,7 @@ from pathlib import Path
 
 from .camera_source import OpenCvCameraSource
 from .download_model import DEFAULT_TARGET, download_model
+from .imu_filter import KneeAngleFilterMirror, KneeAngleFilterParameters
 from .imu_serial import IMUCAL_BAUD_RATE, SerialImuSource
 from .models import LegSide
 from .pose_estimator import MoveNetThunderPoseEstimator
@@ -46,6 +47,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--recording-root", type=Path, default=Path("vision_calibration_recordings"))
     parser.add_argument("--imu-port", help="UNO R4 calibration serial port, e.g. COM3")
     parser.add_argument("--imu-baud", type=int, default=IMUCAL_BAUD_RATE)
+    parser.add_argument(
+        "--filter-config",
+        type=Path,
+        default=Path("settings/current.yaml"),
+        help="Runtime YAML containing stm32_control.knee_angle parameters",
+    )
     return parser
 
 
@@ -79,6 +86,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.imu_port
         else None
     )
+    filter_config_path = args.filter_config.expanduser().resolve()
+    filter_parameters = KneeAngleFilterParameters.load_yaml(filter_config_path)
+    imu_filter = KneeAngleFilterMirror(filter_parameters)
     runtime = VisionRuntime(
         camera,
         estimator,
@@ -86,6 +96,8 @@ def main(argv: list[str] | None = None) -> int:
         confidence_threshold=args.confidence,
         recording_root=args.recording_root,
         imu_source=imu_source,
+        imu_filter=imu_filter,
+        imu_filter_config_path=filter_config_path,
     )
     runtime.start()
     app = create_app(runtime)
@@ -93,7 +105,8 @@ def main(argv: list[str] | None = None) -> int:
     url = f"http://{url_host}:{args.port}"
     print(f"Vision–IMU calibration prototype: {url}")
     print(f"Pose backend: {estimator.description}")
-    print(f"IMU serial: {args.imu_port or 'disabled'}")
+    print(f"IMU serial: {args.imu_port or 'manual GUI connection'}")
+    print(f"IMU filter config: {filter_config_path}")
     print("Stop with Ctrl+C.")
     if not args.no_browser:
         threading.Thread(target=_open_browser, args=(url,), daemon=True).start()

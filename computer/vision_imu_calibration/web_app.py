@@ -19,6 +19,7 @@ header { padding:18px 28px; border-bottom:1px solid #253147; background:#101722;
 h1 { margin:0; font-size:22px; letter-spacing:.04em; }
 .sub { margin-top:6px; color:#91a4bf; font-size:13px; }
 main { display:grid; grid-template-columns:minmax(520px,920px) 380px; justify-content:center; gap:18px; padding:18px; max-width:1400px; margin:0 auto; }
+.left-stack { display:flex; flex-direction:column; gap:14px; min-width:0; }
 .video-shell { background:#05070b; border:1px solid #253147; border-radius:16px; overflow:hidden; height:min(70vh,720px); min-height:380px; display:flex; align-items:center; justify-content:center; }
 .video-shell img { max-width:100%; max-height:100%; width:auto; height:auto; object-fit:contain; display:block; }
 .panel { display:flex; flex-direction:column; gap:12px; max-height:min(70vh,720px); overflow-y:auto; padding-right:4px; }
@@ -43,28 +44,54 @@ button:disabled { opacity:.45; cursor:not-allowed; }
 .inline-grid { display:grid; grid-template-columns:1fr auto; gap:8px; align-items:center; margin-top:10px; }
 .inline-grid button { width:auto; min-width:96px; }
 .note { color:#91a4bf; font-size:11px; line-height:1.45; margin-top:9px; }
+.chart-card { background:#121a27; border:1px solid #253147; border-radius:14px; padding:14px; }
+.chart-shell { height:220px; margin-top:10px; }
+.chart-shell canvas { width:100%; height:100%; display:block; background:#0a101a; border-radius:10px; }
+.metric-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:10px; }
+.metric { background:#0d1420; border:1px solid #2a3952; border-radius:10px; padding:10px; }
+.metric .name { color:#91a4bf; font-size:10px; text-transform:uppercase; letter-spacing:.08em; }
+.metric .number { margin-top:5px; font-size:18px; font-weight:700; }
 footer { max-width:1400px; margin:0 auto; padding:0 18px 18px; color:#73849c; font-size:11px; }
 @media(max-width:1050px){ main{grid-template-columns:1fr;max-width:900px}.video-shell{height:min(62vh,620px);min-height:300px}.panel{max-height:none;overflow:visible} }
 </style>
 </head>
 <body>
 <header>
-<h1>VISION–IMU CALIBRATION · PC FEASIBILITY PROTOTYPE</h1>
-<div class="sub">MoveNet Thunder side-view pose reference, stabilized landmarks, portrait support, and evidence recording</div>
+<h1>VISION–IMU ACQUISITION & PRESENTATION</h1>
+<div class="sub">Live visual reference, raw dual-IMU acquisition, STM32-equivalent filter output, synchronized recording, and evidence presentation</div>
 </header>
 <main>
-<section class="video-shell"><img id="videoStream" src="/video.mjpg" alt="Live annotated camera stream"></section>
+<section class="left-stack">
+  <div class="video-shell"><img id="videoStream" src="/video.mjpg" alt="Live annotated camera stream"></div>
+  <div class="chart-card">
+    <div class="label">Live knee-angle presentation · last 15 s</div>
+    <div class="note">Blue: visual reference · Green: current STM32-equivalent IMU filter output. This is presentation only; no scoring or parameter recommendation is performed.</div>
+    <div class="chart-shell"><canvas id="angleChart"></canvas></div>
+  </div>
+</section>
 <aside class="panel">
 <div class="card"><div class="label">Tracking</div><div id="tracking" class="value">Starting…</div><div id="reason" class="small">Initializing camera and pose model</div></div>
 <div class="card"><div class="label">Visual knee flexion</div><div id="angle" class="value">--.-°</div><div id="rawAngle" class="small">Raw: --.-°</div></div>
 <div class="card"><div class="label">Pose confidence</div><div id="confidence" class="value">0.00</div></div>
+<div class="card">
+  <div class="label">Current IMU knee-angle estimator</div>
+  <div id="imuEstimatorState" class="value small">NO SAMPLE</div>
+  <div class="metric-grid">
+    <div class="metric"><div class="name">IMU flexion</div><div id="imuAngle" class="number">--.-°</div></div>
+    <div class="metric"><div class="name">Visual − IMU</div><div id="angleDifference" class="number">--.-°</div></div>
+    <div class="metric"><div class="name">Knee speed</div><div id="imuSpeed" class="number">--.-°/s</div></div>
+    <div class="metric"><div class="name">Thigh / Shank</div><div id="segmentAngles" class="number">--.- / --.-°</div></div>
+  </div>
+  <button id="reloadImuFilter" class="primary" style="margin-top:10px" onclick="reloadFilterConfig()">Reload settings/current.yaml</button>
+  <div id="imuFilterInfo" class="note">Waiting for synchronized raw IMU samples.</div>
+</div>
 <div class="card"><div class="label">Inference rate</div><div id="fps" class="value">0.0 FPS</div></div>
 <div class="card">
   <div class="label">UNO R4 raw IMU stream</div>
   <div id="imuState" class="value small">DISCONNECTED</div>
   <div class="inline-grid"><select id="imuPort"><option value="">Select COM port</option></select><button onclick="refreshImuPorts()">Refresh</button></div>
   <div class="button-grid"><button id="imuConnect" class="primary" onclick="connectImu()">Connect</button><button id="imuDisconnect" class="stop" onclick="disconnectImu()">Disconnect</button></div>
-  <div id="imuMessage" class="note">Upload the standalone UNO R4 dual-IMU sketch, close Serial Monitor, then connect here.</div>
+  <div id="imuMessage" class="note">Connect starts the continuous 100 Hz calibration stream. Recording only decides whether samples are written to a trial folder.</div>
   <div id="imuRate" class="note">Rate: 0.0 Hz · Port: —</div>
   <div id="imuSensors" class="note">Thigh: NOT READY · Shank: NOT READY</div>
   <div id="imuHealth" class="note">Samples: 0 · Gaps: 0 · Parse errors: 0 · Queue drops: 0</div>
@@ -82,7 +109,7 @@ footer { max-width:1400px; margin:0 auto; padding:0 18px 18px; color:#73849c; fo
     <button id="startRecording" class="record" onclick="recordStart()">Start recording</button>
     <button id="stopRecording" class="stop" onclick="recordStop()">Stop</button>
   </div>
-  <div id="recordingPath" class="note">Video timing follows the monotonic CSV timeline.</div>
+  <div id="recordingPath" class="note">Each trial stores video, pose timeline, raw IMU, processed IMU estimator timeline, synchronized dataset, acquisition summary, and overview plot.</div>
 </div>
 <div class="card">
   <div class="label">Live pose-reference tuning</div>
@@ -129,7 +156,7 @@ footer { max-width:1400px; margin:0 auto; padding:0 18px 18px; color:#73849c; fo
 <div class="card"><div class="label">Runtime</div><div id="runtime" class="value small">STARTING</div><div id="backend" class="note">Backend: MoveNet Thunder</div><div id="source" class="note">Source: —</div><div id="frameCount" class="note">Frames: 0</div></div>
 </aside>
 </main>
-<footer>Standalone calibration path: USB webcam + UNO R4 raw dual-IMU stream. Production telemetry, motor, and safety remain unchanged.</footer>
+<footer>Acquisition/presentation stage only: live vision, raw dual-IMU, current filter output, synchronized evidence. Parameter scoring and recommendation are intentionally outside this stage.</footer>
 <script>
 const ids = {
   confidence_threshold:'confidenceThreshold', landmark_smoothing:'landmarkSmoothing',
@@ -173,6 +200,14 @@ const imuMessage=document.getElementById('imuMessage');
 const cameraProfile=document.getElementById('cameraProfile');
 const applyCameraProfile=document.getElementById('applyCameraProfile');
 const cameraProfileMessage=document.getElementById('cameraProfileMessage');
+const imuEstimatorState=document.getElementById('imuEstimatorState');
+const imuAngle=document.getElementById('imuAngle');
+const angleDifference=document.getElementById('angleDifference');
+const imuSpeed=document.getElementById('imuSpeed');
+const segmentAngles=document.getElementById('segmentAngles');
+const imuFilterInfo=document.getElementById('imuFilterInfo');
+const reloadImuFilter=document.getElementById('reloadImuFilter');
+const angleChart=document.getElementById('angleChart');
 function updateSliderLabels(){
   confidenceThresholdValue.textContent=Number(confidenceThreshold.value).toFixed(2);
   landmarkSmoothingValue.textContent=Number(landmarkSmoothing.value).toFixed(2);
@@ -223,7 +258,7 @@ async function connectImu(){
   if(!imuPort.value){ imuMessage.textContent='Select a COM port first.'; return; }
   const r=await fetch('/api/imu/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({port:imuPort.value,baud_rate:921600})});
   const body=await r.json();
-  imuMessage.textContent=r.ok?`Opening ${imuPort.value}; wait for CONNECTED and both sensors READY.`:'Connect failed: '+(body.error||'unknown error');
+  imuMessage.textContent=r.ok?`Connected to ${imuPort.value}; continuous IMU acquisition is active.`:'Connect failed: '+(body.error||'unknown error');
 }
 async function disconnectImu(){
   const r=await fetch('/api/imu/disconnect',{method:'POST'}); const body=await r.json();
@@ -250,6 +285,31 @@ async function recordStop(){
   const body=await r.json();
   if(!r.ok) recordingPath.textContent='Stop failed: '+(body.error||'unknown error');
 }
+async function reloadFilterConfig(){
+  reloadImuFilter.disabled=true;
+  const r=await fetch('/api/imu-filter/reload',{method:'POST'}); const body=await r.json();
+  imuFilterInfo.textContent=r.ok?'IMU filter parameters reloaded and estimator state reset.':'Reload failed: '+(body.error||'unknown error');
+  reloadImuFilter.disabled=false;
+}
+function drawAngleChart(rows){
+  const rect=angleChart.getBoundingClientRect(); const dpr=window.devicePixelRatio||1;
+  const width=Math.max(320,Math.floor(rect.width)); const height=Math.max(160,Math.floor(rect.height));
+  angleChart.width=Math.floor(width*dpr); angleChart.height=Math.floor(height*dpr);
+  const ctx=angleChart.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,width,height);
+  ctx.fillStyle='#0a101a'; ctx.fillRect(0,0,width,height);
+  if(!rows||rows.length<2){ ctx.fillStyle='#91a4bf'; ctx.font='13px Segoe UI'; ctx.fillText('Waiting for camera and IMU samples…',16,28); return; }
+  const values=[]; for(const row of rows){ if(row.visual_knee_angle_deg!==null&&Number.isFinite(Number(row.visual_knee_angle_deg))) values.push(Number(row.visual_knee_angle_deg)); if(row.imu_knee_angle_deg!==null&&Number.isFinite(Number(row.imu_knee_angle_deg))) values.push(Number(row.imu_knee_angle_deg)); }
+  if(!values.length) return;
+  let min=Math.min(...values), max=Math.max(...values); if(max-min<20){ const mid=(max+min)/2; min=mid-10; max=mid+10; }
+  const left=42,right=12,top=12,bottom=28; const plotW=width-left-right, plotH=height-top-bottom;
+  ctx.strokeStyle='#27364d'; ctx.lineWidth=1;
+  for(let i=0;i<=4;i++){ const y=top+plotH*i/4; ctx.beginPath(); ctx.moveTo(left,y); ctx.lineTo(width-right,y); ctx.stroke(); const val=max-(max-min)*i/4; ctx.fillStyle='#8194ae'; ctx.font='10px Segoe UI'; ctx.fillText(val.toFixed(0)+'°',4,y+3); }
+  const t0=Number(rows[0].host_monotonic_ns), t1=Number(rows[rows.length-1].host_monotonic_ns); const dt=Math.max(1,t1-t0);
+  function line(key,validKey,color){ ctx.strokeStyle=color; ctx.lineWidth=2; ctx.beginPath(); let drawing=false; for(const row of rows){ const value=Number(row[key]); const valid=Boolean(row[validKey]); if(!valid||row[key]===null||!Number.isFinite(value)){ drawing=false; continue; } const x=left+(Number(row.host_monotonic_ns)-t0)/dt*plotW; const y=top+(max-value)/(max-min)*plotH; if(!drawing){ctx.moveTo(x,y);drawing=true;}else ctx.lineTo(x,y);} ctx.stroke(); }
+  line('visual_knee_angle_deg','visual_valid','#39a0ff'); line('imu_knee_angle_deg','imu_valid','#51e26d');
+  ctx.fillStyle='#91a4bf'; ctx.font='10px Segoe UI'; ctx.fillText('−15 s',left,height-8); ctx.fillText('now',width-right-22,height-8);
+}
+async function refreshHistory(){ try{ const r=await fetch('/api/acquisition/history?seconds=15&max_points=300',{cache:'no-store'}); const body=await r.json(); if(r.ok) drawAngleChart(body.rows||[]); }catch(e){} }
 async function refresh(){
   try {
     const r=await fetch('/api/status',{cache:'no-store'}); const s=await r.json();
@@ -271,6 +331,17 @@ async function refresh(){
     imuSensors.textContent='Thigh: '+(imu.thigh_ready?'READY':'NOT READY')+' · Shank: '+(imu.shank_ready?'READY':'NOT READY');
     imuHealth.textContent='Samples: '+Number(imu.sample_count||0)+' · Gaps: '+Number(imu.sequence_gaps||0)+' · Parse errors: '+Number(imu.parse_errors||0)+' · Queue drops: '+Number(imu.queue_drops||0);
     if(imu.last_error) imuHealth.textContent+=' · Error: '+imu.last_error;
+    const est=s.imu_estimator||{};
+    imuEstimatorState.textContent=est.valid?'VALID':String(est.filter_reason||est.reason||'NO SAMPLE').toUpperCase();
+    imuEstimatorState.className='value small '+(est.valid?'ok':'bad');
+    imuAngle.textContent=est.knee_angle_deg==null?'--.-°':Number(est.knee_angle_deg).toFixed(1)+'°';
+    imuSpeed.textContent=est.knee_speed_deg_s==null?'--.-°/s':Number(est.knee_speed_deg_s).toFixed(1)+'°/s';
+    segmentAngles.textContent=(est.thigh_angle_deg==null?'--.-':Number(est.thigh_angle_deg).toFixed(1))+' / '+(est.shank_angle_deg==null?'--.-':Number(est.shank_angle_deg).toFixed(1))+'°';
+    const visual=Number(s.visual_knee_angle_deg), imuValue=Number(est.knee_angle_deg);
+    angleDifference.textContent=(s.tracking_valid&&est.valid&&Number.isFinite(visual)&&Number.isFinite(imuValue))?(visual-imuValue).toFixed(1)+'°':'--.-°';
+    const params=est.parameters||{};
+    imuFilterInfo.textContent='Config: '+(est.config_path||'defaults')+' · axis '+(params.rotation_axis_name||'—')+' · α '+Number(params.alpha_stable||0).toFixed(3)+' / '+Number(params.alpha_dynamic||0).toFixed(3)+' · offset '+Number(params.straight_leg_offset_deg||0).toFixed(1)+'°';
+    reloadImuFilter.disabled=Boolean((s.recording||{}).active);
     imuConnect.disabled=Boolean(imu.configured)||Boolean((s.recording||{}).active);
     imuDisconnect.disabled=!Boolean(imu.configured)||Boolean((s.recording||{}).active);
     if(imu.port && [...imuPort.options].some(o=>o.value===imu.port)) imuPort.value=imu.port;
@@ -286,7 +357,7 @@ async function refresh(){
     if(!window.tuningLoaded && s.tuning){ loadTuning(s.tuning); window.tuningLoaded=true; }
   } catch(e) { runtime.textContent='UI connection error: '+e; }
 }
-setInterval(refresh,350); refresh(); refreshImuPorts();
+setInterval(refresh,350); setInterval(refreshHistory,700); refresh(); refreshHistory(); refreshImuPorts();
 </script>
 </body>
 </html>
@@ -349,6 +420,24 @@ def create_app(runtime: VisionRuntime) -> Any:
             return jsonify(runtime.disconnect_imu())
         except RuntimeError as exc:
             return jsonify({"error": str(exc)}), 409
+
+    @app.post("/api/imu-filter/reload")
+    def imu_filter_reload() -> Any:
+        try:
+            return jsonify(runtime.reload_imu_filter())
+        except (ValueError, FileNotFoundError) as exc:
+            return jsonify({"error": str(exc)}), 400
+        except RuntimeError as exc:
+            return jsonify({"error": str(exc)}), 409
+
+    @app.get("/api/acquisition/history")
+    def acquisition_history() -> Any:
+        try:
+            seconds = float(request.args.get("seconds", 15.0))
+            max_points = int(request.args.get("max_points", 300))
+            return jsonify({"rows": runtime.acquisition_history(seconds=seconds, max_points=max_points)})
+        except (TypeError, ValueError) as exc:
+            return jsonify({"error": str(exc), "rows": []}), 400
 
     @app.post("/api/camera/profile")
     def camera_profile() -> Any:

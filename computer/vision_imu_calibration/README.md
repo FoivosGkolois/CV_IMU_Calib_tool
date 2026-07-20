@@ -8,7 +8,7 @@ USB webcam ───────────────────────
 UNO R4 + thigh/shank IMUs ── USB Serial ─┘
 ```
 
-The PC runs MoveNet SinglePose Thunder, draws the live side-view leg overlay, records the visual knee angle, receives raw IMU samples, and aligns both streams using the same PC monotonic clock.
+The PC runs MoveNet SinglePose Thunder, draws the live side-view leg overlay, receives raw IMU samples, runs a parity-tested Python mirror of the current STM32 `knee_angle.cpp`, and presents both angle timelines without performing parameter optimization.
 
 ## Isolation from the production system
 
@@ -51,7 +51,7 @@ From the project root:
 10_TEST_VISION_IMU_PC.bat
 ```
 
-The isolated `.venv-vision` installs MoveNet/LiteRT, OpenCV, Flask, pytest, and pyserial.
+The isolated `.venv-vision` installs MoveNet/LiteRT, OpenCV, Flask, pytest, pyserial, PyYAML, and Matplotlib.
 
 ## Fast webcam startup
 
@@ -97,12 +97,13 @@ uno_r4_dual_imu_stream/uno_r4_dual_imu_stream.ino
 11_RUN_VISION_IMU_SYNC_PC.bat
 ```
 
-5. Enter the UNO R4 COM port, for example `COM3`.
-6. Open `http://127.0.0.1:8765`.
+5. Open `http://127.0.0.1:8765`.
+6. In **UNO R4 raw IMU stream**, press **Refresh**, select the UNO R4 COM port, and press **Connect**.
 7. Wait until the UI shows:
    - pose backend `RUNNING`,
    - IMU serial `CONNECTED`,
-   - thigh and shank `READY`.
+   - thigh and shank `READY`,
+   - current IMU estimator `VALID`.
 8. Select the camera-near leg explicitly.
 9. Press **Start recording**, remain still for five seconds, then perform five slow flexion–extension cycles.
 10. Press **Stop**.
@@ -113,14 +114,17 @@ Each session creates:
 
 ```text
 vision_calibration_recordings/vision_imu_session_<timestamp>/
-├── annotated_pose.mp4          # or AVI fallback
-├── pose_timeline.csv           # visual angle, landmarks, PC timestamp
-├── raw_imu.csv                 # raw + converted IMU values, MCU and PC timestamps
-├── synchronized_timeline.csv   # each camera frame paired to nearest IMU sample
+├── annotated_pose.mp4              # or AVI fallback
+├── pose_timeline.csv               # visual landmarks and visual knee angle
+├── raw_imu.csv                     # raw and unit-converted IMU measurements
+├── imu_estimator_timeline.csv      # current STM32-equivalent filter output at IMU rate
+├── synchronized_timeline.csv       # camera rows paired to raw and processed IMU samples
+├── acquisition_summary.json        # descriptive coverage and synchronization evidence
+├── acquisition_overview.png        # visual and IMU angle presentation
 └── recording_metadata.json
 ```
 
-`host_monotonic_ns` is generated from `time.perf_counter_ns()` for both streams. The MCU timestamp is also retained so later stages can evaluate transport delay and reconstruct the native 100 Hz IMU timeline.
+Raw and processed data remain in separate files. `host_monotonic_ns` is generated from `time.perf_counter_ns()` for both streams, while the MCU timestamp is retained for the native 100 Hz IMU timeline.
 
 ## Calibration protocol
 
@@ -168,7 +172,7 @@ A valid hardware trial should show:
 - valid pose tracking above `90%` during the controlled movement,
 - synchronized camera rows with low and stable `sync_delta_ms`.
 
-The next milestone after this gate is the Python mirror of `knee_angle.cpp` and offline parameter scoring.
+This milestone now includes the Python mirror of `knee_angle.cpp` and live/offline presentation. The next milestone is the separate analysis layer that scores candidate parameters and produces recommendations.
 
 ## Manual UNO R4 serial connection
 
@@ -190,3 +194,22 @@ The live page exposes two restartable camera profiles:
 - **Quality — 1280×720:** more source detail and potentially better tracking at difficult side-view angles.
 
 Stop recording before changing profile. The camera briefly restarts, while the MoveNet backend and the rest of the application remain loaded.
+
+
+## Current IMU estimator presentation
+
+After **Connect**, the UNO R4 stream runs continuously, even while the recorder is idle. The web page shows:
+
+- current IMU knee flexion,
+- current knee speed,
+- thigh and shank filtered orientations,
+- visual and IMU angle on a rolling 15 s plot,
+- the active parameter source (`settings/current.yaml`).
+
+The **Reload settings/current.yaml** button resets only the host-side estimator and reloads the current STM32 knee-angle parameters. It does not write parameters to the Arduino or production firmware.
+
+The host implementation is identified as `stm32_knee_angle_cpp_mirror_v1` and is checked against the current C++ implementation when a desktop C++ compiler is available.
+
+## Scope boundary
+
+This stage performs acquisition, deterministic filtering, synchronization, recording, and presentation only. It does not search candidate parameters, calculate an optimization score, or generate a recommendation YAML.
