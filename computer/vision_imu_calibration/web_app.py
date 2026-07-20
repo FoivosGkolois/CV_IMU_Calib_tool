@@ -26,8 +26,8 @@ h1 { margin:0; font-size:clamp(18px,1.7vw,24px); letter-spacing:.035em; }
 .sub { margin-top:5px; color:var(--muted); font-size:clamp(11px,1vw,13px); }
 main { display:grid; grid-template-columns:minmax(0,1fr) minmax(300px,360px); gap:16px; padding:16px; max-width:1580px; margin:0 auto; align-items:start; }
 .primary-column { min-width:0; display:grid; gap:12px; }
-.video-shell { background:#05070b; border:1px solid var(--line); border-radius:14px; overflow:hidden; height:clamp(360px,calc(100vh - 270px),710px); display:flex; align-items:center; justify-content:center; }
-.video-shell img { max-width:100%; max-height:100%; width:auto; height:auto; object-fit:contain; display:block; }
+.video-shell { background:#05070b; border:1px solid var(--line); border-radius:14px; overflow:hidden; width:min(100%,960px); aspect-ratio:16 / 9; justify-self:center; align-self:start; display:flex; align-items:center; justify-content:center; transition:width .12s ease,height .12s ease; }
+.video-shell img { width:100%; height:100%; object-fit:contain; display:block; }
 .live-summary { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; }
 .summary-card, .card, .chart-card { background:var(--surface); border:1px solid var(--line); border-radius:12px; }
 .summary-card { padding:10px 12px; min-width:0; }
@@ -74,13 +74,13 @@ footer { max-width:1580px; margin:0 auto; padding:0 16px 16px; color:#73849c; fo
   main { grid-template-columns:1fr; max-width:960px; }
   .control-panel { position:static; max-height:none; overflow:visible; grid-template-columns:repeat(2,minmax(0,1fr)); }
   .control-panel > .wide { grid-column:1 / -1; }
-  .video-shell { height:min(68vh,680px); min-height:320px; }
+  .video-shell { max-width:100%; }
 }
 @media (max-width:720px) {
   main { padding:10px; gap:10px; }
   .control-panel { grid-template-columns:1fr; }
   .live-summary { grid-template-columns:repeat(2,minmax(0,1fr)); }
-  .video-shell { height:58vh; min-height:280px; }
+  .video-shell { max-width:100%; }
   .button-grid { grid-template-columns:1fr 1fr; }
   header { padding:12px 14px; }
 }
@@ -97,7 +97,7 @@ footer { max-width:1580px; margin:0 auto; padding:0 16px 16px; color:#73849c; fo
 </header>
 <main>
 <section class="primary-column">
-  <div class="video-shell"><img id="videoStream" src="/video.mjpg" alt="Live annotated camera stream"></div>
+  <div id="videoShell" class="video-shell"><img id="videoStream" src="/video.mjpg" alt="Live camera stream"></div>
   <div class="live-summary">
     <div class="summary-card"><div class="label">Tracking</div><div id="tracking" class="value">Starting…</div><div id="reason" class="small">Initializing camera and pose model</div></div>
     <div class="summary-card"><div class="label">Visual angle</div><div id="angle" class="value">--.-°</div><div id="rawAngle" class="small">Raw: --.-°</div></div>
@@ -235,6 +235,25 @@ const segmentAngles=document.getElementById('segmentAngles');
 const imuFilterInfo=document.getElementById('imuFilterInfo');
 const reloadImuFilter=document.getElementById('reloadImuFilter');
 const angleChart=document.getElementById('angleChart');
+const videoShell=document.getElementById('videoShell');
+const videoStream=document.getElementById('videoStream');
+function resizeVideoShell(){
+  const naturalWidth=Number(videoStream.naturalWidth||0);
+  const naturalHeight=Number(videoStream.naturalHeight||0);
+  if(!naturalWidth||!naturalHeight) return;
+  const availableWidth=Math.max(1,videoShell.parentElement.clientWidth);
+  const singleColumn=window.matchMedia('(max-width:1180px)').matches;
+  const reservedHeight=singleColumn?170:150;
+  const availableHeight=Math.max(260,Math.min(760,window.innerHeight-reservedHeight));
+  const aspect=naturalWidth/naturalHeight;
+  const width=Math.min(availableWidth,availableHeight*aspect);
+  const height=width/aspect;
+  videoShell.style.width=Math.max(1,Math.round(width))+'px';
+  videoShell.style.height=Math.max(1,Math.round(height))+'px';
+  videoShell.style.aspectRatio=String(aspect);
+}
+videoStream.addEventListener('load',resizeVideoShell);
+window.addEventListener('resize',resizeVideoShell,{passive:true});
 function updateSliderLabels(){
   confidenceThresholdValue.textContent=Number(confidenceThreshold.value).toFixed(2);
   landmarkSmoothingValue.textContent=Number(landmarkSmoothing.value).toFixed(2);
@@ -300,7 +319,7 @@ async function setCameraProfile(){
     if(!r.ok) throw new Error(body.error||'profile change failed');
     cameraProfileMessage.textContent=`Applied ${body.profile}: ${body.width}×${body.height} @ ${Number(body.fps).toFixed(0)} FPS.`;
   } catch(e) { cameraProfileMessage.textContent='Camera profile failed: '+e; }
-  finally { applyCameraProfile.disabled=false; }
+  finally { applyCameraProfile.disabled=false; setTimeout(resizeVideoShell,350); }
 }
 async function recordStart(){
   recordingPath.textContent='Starting trial…';
@@ -393,7 +412,7 @@ async function refresh(){
     if(!window.tuningLoaded && s.tuning){ loadTuning(s.tuning); window.tuningLoaded=true; }
   } catch(e) { runtime.textContent='UI connection error: '+e; }
 }
-setInterval(refresh,350); setInterval(refreshHistory,700); refresh(); refreshHistory(); refreshImuPorts();
+setInterval(refresh,350); setInterval(refreshHistory,700); setInterval(resizeVideoShell,1000); refresh(); refreshHistory(); refreshImuPorts(); resizeVideoShell();
 </script>
 </body>
 </html>

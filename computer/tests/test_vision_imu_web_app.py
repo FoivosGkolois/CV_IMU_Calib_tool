@@ -95,3 +95,18 @@ def test_filter_reload_and_history_endpoints() -> None:
     history = client.get("/api/acquisition/history?seconds=10&max_points=50")
     assert history.status_code == 200
     assert history.get_json()["rows"][0]["host_monotonic_ns"] == 1
+
+
+def test_page_uses_adaptive_video_shell_and_compact_camera_overlay_contract() -> None:
+    runtime = FakeRuntime()
+    app = create_app(runtime)  # type: ignore[arg-type]
+    client = app.test_client()
+
+    page = client.get("/")
+    assert page.status_code == 200
+    html = page.get_data(as_text=True)
+    assert 'id="videoShell"' in html
+    assert 'function resizeVideoShell()' in html
+    assert "videoStream.naturalWidth" in html
+    assert "setInterval(resizeVideoShell,1000)" in html
+    assert 'alt="Live camera stream"' in html

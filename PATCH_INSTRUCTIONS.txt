@@ -1,80 +1,57 @@
-Vision-IMU Responsive UI + ZIP Recorder Patch
+Vision-IMU — Adaptive Camera View and Minimal Overlay Patch
 
 BASELINE
-Standalone tool root only:
+Standalone tool:
 C:\Users\phevo\Desktop\CV_IMU_Calib_tool
-
-Expected previous patch:
-Vision_IMU_Posterior_Angle_Arc_Patch
+with the Responsive UI & ZIP Recorder patch already applied.
 
 AFFECTED AREA
-- Standalone web GUI layout and responsive behavior
-- Default frame rotation
-- Local recordings-folder opening
-- Recorder output packaging
-- Targeted standalone tests and README
+- Browser camera viewport sizing
+- Camera-frame annotation only
 
-MAIN CHANGES
-1. UI layout
-   - Key tracking/angle metrics move below the video.
-   - Recorder and IMU connection stay at the top of the right panel.
-   - Advanced tuning and diagnostics are collapsible.
-   - Controls use compact fixed heights and responsive breakpoints.
-   - Horizontal overflow in the right panel is suppressed.
+MAIN CHANGE
+1. The webcam container now follows the actual MJPEG frame aspect ratio.
+   It recalculates after stream load, browser resize/zoom, camera-profile changes,
+   and periodically in case frame rotation changes the encoded dimensions.
 
-2. Default orientation
-   - 90 degrees counter-clockwise is the new default.
+2. The camera overlay now contains only one compact top-left badge:
+   TRACKING VALID or TRACKING INVALID.
 
-3. Clickable recording destination
-   - The displayed ZIP path is a button.
-   - Clicking it opens the local recordings folder in Windows Explorer.
+REMOVED FROM THE CAMERA IMAGE
+- Large information panel
+- Pose sticks and joint markers
+- Knee-angle arc and numeric label
+- Confidence, FPS, source, and recorder text
 
-4. Output contract
-   - Output root: recordings\
-   - One completed trial creates one file:
-     recordings\vision_imu_session_<timestamp>.zip
-   - Trial files are stored directly at the ZIP root.
-   - The temporary workspace is removed after successful finalization.
-   - No normal loose trial folder remains.
+All detailed values remain available in the GUI cards and live chart.
+Recorded annotated_pose.mp4 also uses the new minimal status badge.
 
 COPY / REPLACE
 Extract this ZIP into:
 C:\Users\phevo\Desktop\CV_IMU_Calib_tool
 
 Keep the folder structure and replace the matching files.
-No source file is deleted.
-The old vision_calibration_recordings folder is not moved or deleted automatically.
+No file is deleted.
 
 RUN
 1. 10_TEST_VISION_IMU_PC.bat
 2. 11_RUN_VISION_IMU_SYNC_PC.bat
 
-EXPECTED
-- Fresh launch defaults to 90 degrees counter-clockwise.
-- The right panel remains compact at increased browser zoom.
-- Clicking the displayed path opens the recordings folder.
-- Stop shows ZIP finalization and ends with one .zip inside recordings.
-- Opening the ZIP shows CSV/JSON/PNG/video files directly, without a containing session folder.
-
-FAILURE BEHAVIOR
-If ZIP finalization fails, the recorder reports the temporary recovery path instead of deleting the only copy of the trial.
+CHECK
+- At 100%, 125%, and 150% browser zoom, the camera border should closely fit
+  the actual stream with no large unused black side areas.
+- Changing Fast/Quality or frame rotation should update the viewport dimensions.
+- The camera image should show only the compact tracking badge at top-left.
 
 VALIDATION
 - Python compileall: PASS
-- Full computer test suite: 232 passed, 1 skipped
-- ZIP finalization, direct-root archive layout, and folder opener: automated tests PASS
+- Vision-IMU targeted suite: 74 passed, 1 skipped
+- New adaptive-viewport and minimal-overlay tests: PASS
 
-REMAINING HARDWARE / WINDOWS CHECKS
-- Visual inspection at 100%, 125%, and 150% browser zoom
-- Windows Explorer opens from the clickable path
-- Real camera + UNO R4 trial produces one valid ZIP
-- Long-trial ZIP finalization time is acceptable
-
-UNCHANGED
-- Arduino sketch and IMUCAL serial protocol
-- Raw IMU fields and timestamps
-- Visual/IMU posterior-angle convention
-- Filter calculations and synchronization schema
+MAIN RISK
+The viewport dimensions depend on the browser-reported MJPEG naturalWidth and
+naturalHeight. The periodic refresh is retained so profile/rotation changes are
+picked up without reloading the page.
 
 GIT COMMIT TITLE
-Improve Vision-IMU UI and finalize trials as ZIP archives
+Make camera viewport adaptive and simplify tracking overlay
