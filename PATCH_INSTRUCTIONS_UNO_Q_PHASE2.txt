@@ -1,0 +1,38 @@
+UNO Q PHASE 2 PATCH
+
+BASELINE
+Apply after:
+1. Vision_IMU_Guided_Static_Dynamic_Calibration_Patch.zip
+2. Vision_IMU_UNO_Q_Phase1_Migration_Patch.zip
+
+INSTALL
+Extract this ZIP into:
+C:\Users\phevo\Desktop\CV_IMU_Calib_tool
+Choose Replace for matching files. Do not delete the project first.
+
+PC REGRESSION
+Run:
+10_TEST_VISION_IMU_PC.bat
+11_RUN_VISION_IMU_SYNC_PC.bat
+The original UNO R4 and UNO Q Phase 1 workflows remain available.
+
+PHASE 2 APP
+A ready App Lab package is included at:
+uno_q_phase2_app_ready.zip
+
+You can rebuild it from the current source at any time with:
+13_BUILD_UNO_Q_PHASE2_APP.bat
+
+Open/import the ready App in Arduino App Lab and start it on UNO Q.
+Connect the USB camera to UNO Q. Then open from the PC browser:
+http://<UNO-Q-IP>:8765
+
+PHASE 2 DATA FLOW
+UNO Q MCU: 100 Hz raw dual-IMU acquisition
+Arduino Bridge: internal MCU-to-Linux transfer
+UNO Q Linux: MoveNet, GUI, filtering, synchronization, ZIP recording, static/dynamic calibration
+PC: browser only
+
+IMPORTANT
+This patch does not add motor control and does not replace the Phase 1 serial sketch.
+Bridge throughput, camera access, MoveNet runtime installation, and actual FPS require UNO Q hardware validation.
