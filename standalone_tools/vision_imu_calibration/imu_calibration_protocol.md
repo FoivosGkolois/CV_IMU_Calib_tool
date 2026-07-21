@@ -2,6 +2,17 @@
 
 Transport: USB serial, `921600 baud`, ASCII CSV, one message per line.
 
+## Firmware implementations
+
+The following standalone sketches implement the exact same wire contract:
+
+```text
+arduino/uno_r4_dual_imu_stream/uno_r4_dual_imu_stream.ino
+arduino/uno_q_dual_imu_stream/uno_q_dual_imu_stream.ino
+```
+
+Changing between UNO R4 and UNO Q must not change the host parser, CSV field order, raw conversion constants, command set, or schema version.
+
 ## Commands
 
 ```text
