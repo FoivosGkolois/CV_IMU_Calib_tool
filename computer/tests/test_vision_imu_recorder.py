@@ -286,3 +286,38 @@ def test_open_output_location_uses_windows_explorer(tmp_path: Path, monkeypatch)
     resolved = recorder.open_output_location()
     assert opened == [resolved]
     assert Path(resolved).is_dir()
+
+
+def test_recorder_supports_calibration_output_root_prefix_and_metadata(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    fake_cv2 = FakeCv2()
+    monkeypatch.setattr("computer.vision_imu_calibration.recorder._load_cv2", lambda: fake_cv2)
+    recorder = AnnotatedVideoRecorder(tmp_path / "recordings")
+    calibration_root = tmp_path / "calibration_results" / "calibration_run_test"
+    recorder.request_start(
+        settings={},
+        source="camera:0",
+        output_root=calibration_root,
+        session_name_prefix="static_test",
+        extra_metadata={"calibration_test_type": "static"},
+    )
+    frame = np.zeros((120, 160, 3), dtype=np.uint8)
+    recorder.write(
+        frame,
+        preferred_fps=10.0,
+        sample={
+            "frame_index": 1,
+            "visual_knee_angle_deg": 150.0,
+            "tracking_valid": True,
+        },
+    )
+    status = recorder.stop()
+
+    archive = Path(status.archive_path)
+    assert archive.parent == calibration_root.resolve()
+    assert archive.name.startswith("static_test_")
+    assert status.output_root == str(calibration_root.resolve())
+    metadata = _zip_json(status.archive_path, "recording_metadata.json")
+    assert metadata["calibration_test_type"] == "static"

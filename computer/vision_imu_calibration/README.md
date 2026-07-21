@@ -8,7 +8,7 @@ USB webcam ───────────────────────
 UNO R4 + thigh/shank IMUs ── USB Serial ─┘
 ```
 
-The PC runs MoveNet SinglePose Thunder, draws the live side-view leg overlay, receives raw IMU samples, runs a parity-tested Python mirror of the current STM32 `knee_angle.cpp`, and presents both angle timelines without performing parameter optimization.
+The PC runs MoveNet SinglePose Thunder, draws the live side-view leg overlay, receives raw IMU samples, runs a parity-tested Python mirror of the current STM32 `knee_angle.cpp`, and presents both angle timelines. A guided offline layer can replay the recorded raw IMU data and export comparative recommended filter settings after the static and dynamic tests.
 
 ## Isolation from the production system
 
@@ -163,7 +163,7 @@ The web panel controls only pose validation and display filtering around the fix
 - minimum visible segment,
 - maximum accepted angle jump.
 
-These values do not modify the neural-network weights and do not yet tune the exoskeleton IMU filter.
+These values do not modify the neural-network weights. The calibration workflow uses the active pose-reference settings but never changes them automatically during a test.
 
 ## Acceptance gate for this milestone
 
@@ -177,7 +177,7 @@ A valid hardware trial should show:
 - valid pose tracking above `90%` during the controlled movement,
 - synchronized camera rows with low and stable `sync_delta_ms`.
 
-This milestone now includes the Python mirror of `knee_angle.cpp` and live/offline presentation. The next milestone is the separate analysis layer that scores candidate parameters and produces recommendations.
+This milestone includes the Python mirror of `knee_angle.cpp`, live/offline presentation, and the guided static/dynamic recommendation workflow.
 
 ## Manual UNO R4 serial connection
 
@@ -217,7 +217,7 @@ The host implementation is identified as `stm32_knee_angle_cpp_mirror_v1` and is
 
 ## Scope boundary
 
-This stage performs acquisition, deterministic filtering, synchronization, recording, and presentation only. It does not search candidate parameters, calculate an optimization score, or generate a recommendation YAML.
+The live runtime performs acquisition, deterministic filtering, synchronization, recording, and presentation. Parameter search runs only offline after both guided tests finish. It uses a limited deterministic grid, preserves the confirmed axis/sign conventions, and exports a recommendation YAML without writing anything to the Arduino or production firmware.
 
 ## Standalone calibration-tool copy
 
@@ -248,3 +248,47 @@ The visual overlay also draws a live colored arc behind the knee.
 The camera, four live metric cards, angle plot, and control cards can be resized from their lower-right corner. The browser stores these dimensions locally. Use **Reset all box sizes** in the Custom layout card to return to defaults.
 
 The live video overlay includes the compact tracking badge plus the thigh/shank bars, hip-knee-ankle markers, posterior knee-angle arc, and live angle value.
+
+## Guided static and dynamic calibration
+
+The web GUI now provides two guided tests. Both require the UNO R4 stream to be connected, both IMUs to be ready, and visual tracking to be valid.
+
+### Static test
+
+Press **Start static test**, read the instructions, and start the five-second countdown. The tool then records automatically for 12 seconds. Keep the complete hip–knee–ankle chain visible and keep the leg completely still at one comfortable angle.
+
+The static test estimates:
+
+- the common knee-angle offset relative to the visual reference,
+- thigh and shank gyro biases,
+- a practical gyro deadband from the stationary noise.
+
+### Dynamic test
+
+After the static test finishes, press **Start dynamic test**. After the five-second countdown, perform about five slow and smooth flexion–extension cycles. The recording stops automatically after 25 seconds.
+
+The PC replays the recorded raw IMU data through a limited deterministic parameter grid. It compares the replayed IMU angle with the synchronized visual reference and selects the candidate with the best combined angle-error, lag, jitter, and drift score.
+
+The workflow preserves the confirmed axis mapping and sign conventions. It does not rewrite hardware orientation parameters automatically.
+
+### Calibration output
+
+Each run is stored under:
+
+```text
+calibration_results/calibration_run_<timestamp>/
+```
+
+The folder contains:
+
+```text
+static_test_<timestamp>.zip
+dynamic_test_<timestamp>.zip
+recommended_imu_settings.yaml
+calibration_report.json
+calibration_overview.png
+```
+
+The export path in the GUI is clickable and opens the local calibration folder. If tracking, synchronization, sample continuity, stillness, or movement range do not pass the quality gates, the tool exports an invalid report but does not create a recommendation YAML.
+
+The generated settings are **data-driven recommendations for the recorded setup**, not certified ground-truth parameters. They must still be reviewed before being copied into the production configuration.

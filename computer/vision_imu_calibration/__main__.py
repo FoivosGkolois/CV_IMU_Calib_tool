@@ -49,6 +49,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--no-browser", action="store_true")
     parser.add_argument("--recording-root", type=Path, default=Path("recordings"))
+    parser.add_argument(
+        "--calibration-root",
+        type=Path,
+        default=Path("calibration_results"),
+        help="Folder for guided static/dynamic calibration runs and recommended settings",
+    )
     parser.add_argument("--imu-port", help="UNO R4 calibration serial port, e.g. COM3")
     parser.add_argument("--imu-baud", type=int, default=IMUCAL_BAUD_RATE)
     parser.add_argument(
@@ -103,6 +109,7 @@ def main(argv: list[str] | None = None) -> int:
         leg_side=LegSide(args.leg),
         confidence_threshold=args.confidence,
         recording_root=args.recording_root,
+        calibration_root=args.calibration_root,
         imu_source=imu_source,
         imu_filter=imu_filter,
         imu_filter_config_path=filter_config_path,

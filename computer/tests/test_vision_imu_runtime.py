@@ -370,3 +370,60 @@ def test_imu_loop_updates_live_filter_estimate(tmp_path: Path) -> None:
     status = runtime.imu_estimator_status()
     assert status["valid"] is True
     assert status["knee_angle_deg"] == pytest.approx(90.0, abs=0.2)
+
+
+class ReadyCalibrationImuSource:
+    configured = True
+
+    def status(self):
+        return {
+            "configured": True,
+            "connected": True,
+            "capture_active": True,
+            "port": "COM4",
+            "baud_rate": 921600,
+            "state": "CAPTURING",
+            "sample_rate_hz": 100.0,
+            "sample_count": 100,
+            "parse_errors": 0,
+            "sequence_gaps": 0,
+            "queue_drops": 0,
+            "thigh_ready": True,
+            "shank_ready": True,
+            "last_sample_index": 99,
+            "last_error": "",
+        }
+
+    def stop(self):
+        return None
+
+
+def test_runtime_starts_guided_static_calibration_only_when_ready(tmp_path: Path) -> None:
+    runtime = VisionRuntime(
+        PreviewCamera(),
+        FakeEstimator(),
+        recording_root=tmp_path / "recordings",
+        calibration_root=tmp_path / "calibration_results",
+        imu_source=ReadyCalibrationImuSource(),  # type: ignore[arg-type]
+    )  # type: ignore[arg-type]
+    runtime._status = RuntimeStatus(  # noqa: SLF001 - focused runtime state test
+        state="RUNNING",
+        source="preview-camera",
+        requested_leg="right",
+        tracked_leg="right",
+        tracking_valid=True,
+        tracking_reason="ok",
+        visual_knee_angle_deg=150.0,
+        raw_knee_angle_deg=150.0,
+        pose_confidence=0.9,
+        inference_fps=10.0,
+        frame_index=10,
+        error="",
+    )
+
+    status = runtime.start_calibration_test("static")
+    assert status["active"] is True
+    assert status["current_test"] == "static"
+    assert Path(status["run_directory"]).is_dir()
+    cancelled = runtime.cancel_calibration_test()
+    assert cancelled["active"] is False

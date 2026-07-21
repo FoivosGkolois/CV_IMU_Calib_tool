@@ -151,8 +151,20 @@ class AnnotatedVideoRecorder:
         self._imu_source = ""
         self._record_fps = 0.0
         self._metadata: dict[str, Any] = {}
+        self._session_output_root: Path | None = None
+        self._session_name_prefix = "vision_imu_session"
+        self._extra_metadata: dict[str, Any] = {}
 
-    def request_start(self, *, settings: Mapping[str, Any], source: str, imu_source: str = "") -> None:
+    def request_start(
+        self,
+        *,
+        settings: Mapping[str, Any],
+        source: str,
+        imu_source: str = "",
+        output_root: str | Path | None = None,
+        session_name_prefix: str = "vision_imu_session",
+        extra_metadata: Mapping[str, Any] | None = None,
+    ) -> None:
         with self._lock:
             if self._requested or self._writer is not None:
                 return
@@ -161,6 +173,15 @@ class AnnotatedVideoRecorder:
             self._settings_snapshot = dict(settings)
             self._source = str(source)
             self._imu_source = str(imu_source)
+            self._session_output_root = (
+                Path(output_root) if output_root is not None else self.output_root
+            )
+            clean_prefix = "".join(
+                character if character.isalnum() or character in {"-", "_"} else "_"
+                for character in str(session_name_prefix or "vision_imu_session")
+            ).strip("_")
+            self._session_name_prefix = clean_prefix or "vision_imu_session"
+            self._extra_metadata = dict(extra_metadata or {})
             self._started_monotonic_ns = time.perf_counter_ns()
             self._create_session_locked()
 
@@ -271,16 +292,20 @@ class AnnotatedVideoRecorder:
         self._last_frame = None
         self._metadata = {}
         self._record_fps = 0.0
+        self._session_output_root = None
+        self._session_name_prefix = "vision_imu_session"
+        self._extra_metadata = {}
 
     def _create_session_locked(self) -> None:
-        self.output_root.mkdir(parents=True, exist_ok=True)
+        output_root = self._session_output_root or self.output_root
+        output_root.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        session_name = f"vision_imu_session_{timestamp}"
-        archive_path = self.output_root / f"{session_name}.zip"
+        session_name = f"{self._session_name_prefix}_{timestamp}"
+        archive_path = output_root / f"{session_name}.zip"
         suffix = 1
         while archive_path.exists():
-            session_name = f"vision_imu_session_{timestamp}_{suffix:02d}"
-            archive_path = self.output_root / f"{session_name}.zip"
+            session_name = f"{self._session_name_prefix}_{timestamp}_{suffix:02d}"
+            archive_path = output_root / f"{session_name}.zip"
             suffix += 1
 
         session_dir = Path(tempfile.mkdtemp(prefix=f"{session_name}_"))
@@ -324,6 +349,7 @@ class AnnotatedVideoRecorder:
             "timing_mode": "shared_pc_perf_counter_ns_nearest_sample",
             "session_start_host_monotonic_ns": self._started_monotonic_ns,
             "tuning": self._settings_snapshot,
+            **self._extra_metadata,
         }
         self._write_metadata_locked()
 
@@ -437,7 +463,8 @@ class AnnotatedVideoRecorder:
         if not self._session_dir.is_dir():
             raise RuntimeError(f"Recording staging directory is missing: {self._session_dir}")
 
-        self.output_root.mkdir(parents=True, exist_ok=True)
+        archive_root = self._archive_path.parent
+        archive_root.mkdir(parents=True, exist_ok=True)
         temporary_archive = self._archive_path.with_suffix(".zip.partial")
         temporary_archive.unlink(missing_ok=True)
         try:
@@ -474,7 +501,8 @@ class AnnotatedVideoRecorder:
             else self._final_elapsed_s
         )
         archive_path = str(self._archive_path.resolve()) if self._archive_path is not None else ""
-        output_root = str(self.output_root.expanduser().resolve())
+        active_output_root = self._session_output_root or self.output_root
+        output_root = str(active_output_root.expanduser().resolve())
         return RecordingStatus(
             active=active,
             path=archive_path,

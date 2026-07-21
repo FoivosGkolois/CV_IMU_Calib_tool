@@ -11,6 +11,7 @@ class FakeRuntime:
     def __init__(self) -> None:
         self.connected: tuple[str, int] | None = None
         self.profile = "fast"
+        self.calibration_test = ""
 
     def status(self):
         return {"state": "RUNNING"}
@@ -44,6 +45,21 @@ class FakeRuntime:
 
     def open_recordings_location(self):
         return {"path": "C:/tool/recordings"}
+
+    def start_calibration_test(self, test_type: str):
+        self.calibration_test = test_type
+        return {"active": True, "current_test": test_type, "duration_s": 12.0}
+
+    def stop_calibration_test(self):
+        self.calibration_test = ""
+        return {"active": False, "state": "STATIC_COMPLETE"}
+
+    def cancel_calibration_test(self):
+        self.calibration_test = ""
+        return {"active": False, "state": "IDLE"}
+
+    def open_calibration_location(self):
+        return {"path": "C:/tool/calibration_results/calibration_run_test"}
 
     def wait_for_jpeg(self, after_sequence: int, timeout_s: float = 1.0):
         return after_sequence, None
@@ -106,9 +122,9 @@ def test_page_uses_adaptive_and_user_resizable_video_shell() -> None:
     assert page.status_code == 200
     html = page.get_data(as_text=True)
     assert 'id="videoShell"' in html
-    assert 'function resizeVideoShell()' in html
+    assert 'function resizeVideoShell(force=false)' in html
     assert "videoStream.naturalWidth" in html
-    assert "setInterval(resizeVideoShell,1000)" in html
+    assert "setInterval(()=>resizeVideoShell(false),1500)" in html
     assert 'alt="Live camera stream"' in html
     assert 'data-resize-id="camera"' in html
     assert "visionImuCustomBoxSizesV1" in html
@@ -126,7 +142,7 @@ def test_page_uses_left_camera_live_dashboard_workspace_without_header() -> None
     assert '<section class="live-column">' in html
     assert html.index('class="camera-column"') < html.index('class="live-column"')
     assert html.index('class="live-column"') < html.index('class="control-panel"')
-    assert "grid-template-columns:minmax(360px,max-content) minmax(360px,1fr) minmax(300px,340px)" in html
+    assert "grid-template-columns:minmax(360px,max-content) minmax(340px,1fr) minmax(300px,340px)" in html
     assert "justify-self:start" in html
 
 
@@ -138,7 +154,7 @@ def test_page_makes_live_plot_and_all_main_cards_user_resizable() -> None:
     html = client.get("/").get_data(as_text=True)
     expected_ids = (
         "tracking-card", "visual-card", "imu-card", "pose-card", "angle-plot",
-        "recording-card", "imu-stream-card", "camera-profile-card",
+        "calibration-card", "recording-card", "imu-stream-card", "camera-profile-card",
         "estimator-card", "tuning-card", "diagnostics-card",
     )
     for resize_id in expected_ids:
@@ -146,3 +162,30 @@ def test_page_makes_live_plot_and_all_main_cards_user_resizable() -> None:
     assert ".resizable-box { resize:both" in html
     assert ".chart-card { padding:12px; height:270px" in html
     assert "Reset all box sizes" in html
+
+
+def test_guided_calibration_endpoints_and_countdown_ui() -> None:
+    runtime = FakeRuntime()
+    app = create_app(runtime)  # type: ignore[arg-type]
+    client = app.test_client()
+
+    page = client.get("/")
+    html = page.get_data(as_text=True)
+    assert "Start static test" in html
+    assert "Start dynamic test" in html
+    assert "Start 5-second countdown" in html
+    assert "Wear both IMUs firmly" in html
+    assert "openCalibrationLocation" in html
+    assert 'id="calibrationPath"' in html
+
+    started = client.post("/api/calibration/start", json={"test_type": "static"})
+    assert started.status_code == 200
+    assert runtime.calibration_test == "static"
+
+    stopped = client.post("/api/calibration/stop")
+    assert stopped.status_code == 200
+    assert runtime.calibration_test == ""
+
+    opened = client.post("/api/calibration/open")
+    assert opened.status_code == 200
+    assert "calibration_run_test" in opened.get_json()["path"]

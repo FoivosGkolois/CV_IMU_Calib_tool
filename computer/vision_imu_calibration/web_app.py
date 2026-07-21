@@ -71,6 +71,19 @@ button:disabled { opacity:.45; cursor:not-allowed; }
 .chart-shell canvas { width:100%; height:100%; display:block; background:#0a101a; border-radius:9px; }
 .layout-tools { display:grid; gap:8px; }
 .layout-tools .note { margin-top:0; }
+
+.calibration-card { border-color:#6f5b25; box-shadow:0 0 0 1px rgba(255,194,77,.10); }
+.calibration-actions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-top:9px; }
+.calibration-actions button { min-height:38px; height:auto; padding:7px 9px; }
+.progress-track { height:8px; margin-top:9px; border-radius:999px; overflow:hidden; background:#0a101a; border:1px solid #2a3952; }
+.progress-fill { height:100%; width:0%; background:#39a0ff; transition:width .25s linear; }
+.modal-backdrop { position:fixed; inset:0; z-index:1000; display:flex; align-items:center; justify-content:center; padding:18px; background:rgba(3,7,12,.86); }
+.modal-backdrop[hidden] { display:none; }
+.modal-card { width:min(560px,100%); background:#111925; border:1px solid #3a4e6c; border-radius:16px; padding:18px; box-shadow:0 24px 80px rgba(0,0,0,.5); }
+.modal-card h2 { margin:0 0 10px; font-size:20px; }
+.modal-card ol { margin:10px 0 14px 22px; padding:0; color:#d8e3f4; line-height:1.55; font-size:13px; }
+.countdown { min-height:52px; display:flex; align-items:center; justify-content:center; font-size:42px; font-weight:800; color:#ffcc66; }
+.modal-buttons { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
 footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size:10px; }
 @media (max-width:1280px) {
   main { grid-template-columns:minmax(340px,max-content) minmax(340px,1fr); }
@@ -107,11 +120,25 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
   </div>
   <div class="chart-card resizable-box" data-resize-id="angle-plot">
     <div class="label">Live posterior knee-angle presentation · last 15 s</div>
-    <div class="note">Blue: visual reference · Green: IMU estimate. Presentation only; no scoring or recommendation.</div>
+    <div class="note">Blue: visual reference · Green: IMU estimate. Live display only; calibration scoring runs offline after both tests.</div>
     <div class="chart-shell"><canvas id="angleChart"></canvas></div>
   </div>
 </section>
 <aside class="control-panel">
+  <div class="card priority wide calibration-card resizable-box" data-resize-id="calibration-card">
+    <div class="label">Guided IMU filter calibration</div>
+    <div id="calibrationState" class="value small">READY</div>
+    <div id="calibrationMessage" class="note">Run the static test first, then the dynamic test.</div>
+    <div class="progress-track"><div id="calibrationProgress" class="progress-fill"></div></div>
+    <div class="calibration-actions">
+      <button id="startStaticTest" class="primary" onclick="showCalibrationInstructions('static')">Start static test</button>
+      <button id="startDynamicTest" class="primary" onclick="showCalibrationInstructions('dynamic')">Start dynamic test</button>
+      <button id="stopCalibrationTest" class="stop" onclick="stopCalibrationTest()">Stop current test</button>
+      <button id="cancelCalibrationTest" class="secondary" onclick="cancelCalibrationTest()">Cancel test</button>
+    </div>
+    <button id="calibrationPath" class="path-link" onclick="openCalibrationLocation()" disabled>Calibration files will be exported to calibration_results.</button>
+  </div>
+
   <div class="card priority wide resizable-box" data-resize-id="recording-card">
     <div class="label">Recording</div>
     <div id="recording" class="value small">IDLE</div>
@@ -190,7 +217,19 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
   </details>
 </aside>
 </main>
-<footer>Acquisition/presentation stage only: live vision, raw dual-IMU, current filter output, synchronized evidence. Parameter scoring and recommendation are intentionally outside this stage.</footer>
+<div id="calibrationModal" class="modal-backdrop" hidden>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="calibrationModalTitle">
+    <h2 id="calibrationModalTitle">Calibration test</h2>
+    <div id="calibrationModalIntro" class="note"></div>
+    <ol id="calibrationInstructions"></ol>
+    <div id="calibrationCountdown" class="countdown">Ready</div>
+    <div class="modal-buttons">
+      <button id="beginCalibrationCountdown" class="primary" onclick="beginCalibrationCountdown()">Start 5-second countdown</button>
+      <button id="closeCalibrationModal" class="secondary" onclick="closeCalibrationModal()">Back</button>
+    </div>
+  </div>
+</div>
+<footer>Live acquisition plus guided static/dynamic calibration. Recommendations are comparative, data-driven settings based on the synchronized visual reference.</footer>
 <script>
 const ids = {
   confidence_threshold:'confidenceThreshold', landmark_smoothing:'landmarkSmoothing',
@@ -223,6 +262,21 @@ const recording=document.getElementById('recording');
 const startRecording=document.getElementById('startRecording');
 const stopRecording=document.getElementById('stopRecording');
 const recordingPath=document.getElementById('recordingPath');
+const calibrationState=document.getElementById('calibrationState');
+const calibrationMessage=document.getElementById('calibrationMessage');
+const calibrationProgress=document.getElementById('calibrationProgress');
+const startStaticTest=document.getElementById('startStaticTest');
+const startDynamicTest=document.getElementById('startDynamicTest');
+const stopCalibrationTestButton=document.getElementById('stopCalibrationTest');
+const cancelCalibrationTestButton=document.getElementById('cancelCalibrationTest');
+const calibrationPath=document.getElementById('calibrationPath');
+const calibrationModal=document.getElementById('calibrationModal');
+const calibrationModalTitle=document.getElementById('calibrationModalTitle');
+const calibrationModalIntro=document.getElementById('calibrationModalIntro');
+const calibrationInstructions=document.getElementById('calibrationInstructions');
+const calibrationCountdown=document.getElementById('calibrationCountdown');
+const beginCalibrationCountdownButton=document.getElementById('beginCalibrationCountdown');
+const closeCalibrationModalButton=document.getElementById('closeCalibrationModal');
 const imuState=document.getElementById('imuState');
 const imuRate=document.getElementById('imuRate');
 const imuSensors=document.getElementById('imuSensors');
@@ -380,6 +434,81 @@ async function setCameraProfile(){
   } catch(e) { cameraProfileMessage.textContent='Camera profile failed: '+e; }
   finally { applyCameraProfile.disabled=false; setTimeout(resizeVideoShell,350); }
 }
+const CALIBRATION_GUIDANCE={
+  static:{
+    title:'Static calibration test',
+    intro:'The tool records for 12 seconds and then stops automatically.',
+    steps:[
+      'Wear both IMUs firmly on the thigh and shank of the leg shown to the camera.',
+      'Keep the complete hip–knee–ankle chain visible and wait for Tracking VALID.',
+      'Choose one comfortable knee angle and remain completely still for the full test.'
+    ]
+  },
+  dynamic:{
+    title:'Dynamic calibration test',
+    intro:'The tool records for 25 seconds and then generates the recommended settings.',
+    steps:[
+      'Keep exactly the same IMU mounting and camera position used for the static test.',
+      'Keep the complete hip–knee–ankle chain visible and wait for Tracking VALID.',
+      'Perform about five slow, smooth flexion–extension cycles without sudden movements.'
+    ]
+  }
+};
+let pendingCalibrationType='';
+let calibrationCountdownTimer=null;
+function showCalibrationInstructions(testType){
+  const guide=CALIBRATION_GUIDANCE[testType]; if(!guide) return;
+  pendingCalibrationType=testType;
+  calibrationModalTitle.textContent=guide.title;
+  calibrationModalIntro.textContent=guide.intro;
+  calibrationInstructions.innerHTML='';
+  for(const step of guide.steps){ const item=document.createElement('li'); item.textContent=step; calibrationInstructions.appendChild(item); }
+  calibrationCountdown.textContent='Ready';
+  beginCalibrationCountdownButton.disabled=false;
+  closeCalibrationModalButton.disabled=false;
+  calibrationModal.hidden=false;
+}
+function closeCalibrationModal(){
+  if(calibrationCountdownTimer!==null) return;
+  calibrationModal.hidden=true; pendingCalibrationType='';
+}
+async function beginCalibrationCountdown(){
+  if(!pendingCalibrationType||calibrationCountdownTimer!==null) return;
+  beginCalibrationCountdownButton.disabled=true; closeCalibrationModalButton.disabled=true;
+  let remaining=5; calibrationCountdown.textContent=String(remaining);
+  calibrationCountdownTimer=window.setInterval(async()=>{
+    remaining-=1;
+    if(remaining>0){ calibrationCountdown.textContent=String(remaining); return; }
+    window.clearInterval(calibrationCountdownTimer); calibrationCountdownTimer=null;
+    calibrationCountdown.textContent='START';
+    const testType=pendingCalibrationType;
+    try{
+      const r=await fetch('/api/calibration/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({test_type:testType})});
+      const body=await r.json();
+      if(!r.ok) throw new Error(body.error||'calibration start failed');
+      calibrationModal.hidden=true; pendingCalibrationType='';
+      calibrationMessage.textContent=body.message||`${testType} test started.`;
+    }catch(e){
+      calibrationCountdown.textContent='Could not start';
+      calibrationMessage.textContent='Calibration start failed: '+e;
+      beginCalibrationCountdownButton.disabled=false; closeCalibrationModalButton.disabled=false;
+    }
+  },1000);
+}
+async function stopCalibrationTest(){
+  calibrationMessage.textContent='Stopping and finalizing the current calibration test…';
+  const r=await fetch('/api/calibration/stop',{method:'POST'}); const body=await r.json();
+  calibrationMessage.textContent=r.ok?(body.message||'Calibration test stopped.'):('Stop failed: '+(body.error||'unknown error'));
+}
+async function cancelCalibrationTest(){
+  const r=await fetch('/api/calibration/cancel',{method:'POST'}); const body=await r.json();
+  calibrationMessage.textContent=r.ok?(body.message||'Calibration test cancelled.'):('Cancel failed: '+(body.error||'unknown error'));
+}
+async function openCalibrationLocation(){
+  const r=await fetch('/api/calibration/open',{method:'POST'}); const body=await r.json();
+  if(!r.ok) calibrationPath.textContent='Could not open calibration folder: '+(body.error||'unknown error');
+}
+
 async function recordStart(){
   recordingPath.textContent='Starting trial…';
   const r=await fetch('/api/recording/start',{method:'POST'});
@@ -453,17 +582,32 @@ async function refresh(){
     angleDifference.textContent=(s.tracking_valid&&est.valid&&Number.isFinite(visual)&&Number.isFinite(imuValue))?(visual-imuValue).toFixed(1)+'°':'--.-°';
     const params=est.parameters||{};
     imuFilterInfo.textContent='Config: '+(est.config_path||'defaults')+' · axis '+(params.rotation_axis_name||'—')+' · α '+Number(params.alpha_stable||0).toFixed(3)+' / '+Number(params.alpha_dynamic||0).toFixed(3)+' · offset '+Number(params.straight_leg_offset_deg||0).toFixed(1)+'°';
-    reloadImuFilter.disabled=Boolean((s.recording||{}).active);
-    imuConnect.disabled=Boolean(imu.configured)||Boolean((s.recording||{}).active);
-    imuDisconnect.disabled=!Boolean(imu.configured)||Boolean((s.recording||{}).active);
+    const calibrationLocked=Boolean((s.calibration||{}).active)||(s.calibration||{}).state==='ANALYZING';
+    reloadImuFilter.disabled=Boolean((s.recording||{}).active)||calibrationLocked;
+    imuConnect.disabled=Boolean(imu.configured)||Boolean((s.recording||{}).active)||calibrationLocked;
+    imuDisconnect.disabled=!Boolean(imu.configured)||Boolean((s.recording||{}).active)||calibrationLocked;
     if(imu.port && [...imuPort.options].some(o=>o.value===imu.port)) imuPort.value=imu.port;
     const camera=s.camera||{};
     if(!window.cameraProfileLoaded && camera.profile){ cameraProfile.value=camera.profile; window.cameraProfileLoaded=true; }
-    applyCameraProfile.disabled=Boolean((s.recording||{}).active)||camera.reconfigurable===false||!['CAMERA_PREVIEW','RUNNING','AI_FAILED'].includes(s.state);
+    applyCameraProfile.disabled=Boolean((s.recording||{}).active)||calibrationLocked||camera.reconfigurable===false||!['CAMERA_PREVIEW','RUNNING','AI_FAILED'].includes(s.state);
+    const cal=s.calibration||{};
+    calibrationState.textContent=String(cal.state||'IDLE').replaceAll('_',' ');
+    calibrationState.className='value small '+(cal.valid?'ok':(cal.state==='FAILED'||cal.state==='INVALID'?'bad':''));
+    calibrationMessage.textContent=cal.error?`${cal.message||''} Error: ${cal.error}`:(cal.message||'Run the static test first, then the dynamic test.');
+    calibrationProgress.style.width=(100*Number(cal.progress||0)).toFixed(1)+'%';
+    const calibrationBusy=Boolean(cal.active)||cal.state==='ANALYZING';
+    startStaticTest.disabled=calibrationBusy||Boolean((s.recording||{}).active)||!Boolean(imu.connected)||!Boolean(imu.thigh_ready&&imu.shank_ready)||!Boolean(s.tracking_valid);
+    startDynamicTest.disabled=calibrationBusy||Boolean((s.recording||{}).active)||!Boolean(cal.static_archive_path)||!Boolean(imu.connected)||!Boolean(imu.thigh_ready&&imu.shank_ready)||!Boolean(s.tracking_valid);
+    stopCalibrationTestButton.disabled=!Boolean(cal.active);
+    cancelCalibrationTestButton.disabled=!Boolean(cal.active);
+    calibrationPath.disabled=!Boolean(cal.export_path);
+    if(cal.recommendation_path) calibrationPath.textContent='Open recommended settings: '+cal.recommendation_path;
+    else if(cal.export_path) calibrationPath.textContent='Open calibration export folder: '+cal.export_path;
+    else calibrationPath.textContent='Calibration files will be exported to calibration_results.';
     const rec=s.recording||{};
     recording.textContent=rec.active?`RECORDING · ${Number(rec.elapsed_s||0).toFixed(1)} s · ${rec.frame_count||0} camera / ${rec.imu_sample_count||0} IMU samples`:'IDLE';
     recording.className='value small '+(rec.active?'rec':'');
-    startRecording.disabled=Boolean(rec.active); stopRecording.disabled=!rec.active;
+    startRecording.disabled=Boolean(rec.active)||calibrationBusy; stopRecording.disabled=!rec.active||Boolean(cal.active);
     recordingPath.disabled=!Boolean(rec.output_root);
     if(rec.path) recordingPath.textContent=(rec.active?'ZIP destination: ':'Saved ZIP: ')+rec.path;
     else if(rec.output_root) recordingPath.textContent='Open recordings folder: '+rec.output_root;
@@ -505,6 +649,8 @@ def create_app(runtime: VisionRuntime) -> Any:
             return jsonify(runtime.update_tuning(payload))
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
+        except RuntimeError as exc:
+            return jsonify({"error": str(exc)}), 409
 
     @app.get("/api/imu/ports")
     def imu_ports() -> Any:
@@ -581,6 +727,37 @@ def create_app(runtime: VisionRuntime) -> Any:
     def open_recordings() -> Any:
         try:
             return jsonify(runtime.open_recordings_location())
+        except RuntimeError as exc:
+            return jsonify({"error": str(exc)}), 503
+
+    @app.post("/api/calibration/start")
+    def calibration_start() -> Any:
+        payload = request.get_json(silent=True) or {}
+        try:
+            return jsonify(runtime.start_calibration_test(str(payload.get("test_type", ""))))
+        except (ValueError, TypeError) as exc:
+            return jsonify({"error": str(exc)}), 400
+        except RuntimeError as exc:
+            return jsonify({"error": str(exc)}), 409
+
+    @app.post("/api/calibration/stop")
+    def calibration_stop() -> Any:
+        try:
+            return jsonify(runtime.stop_calibration_test())
+        except (RuntimeError, FileNotFoundError) as exc:
+            return jsonify({"error": str(exc)}), 409
+
+    @app.post("/api/calibration/cancel")
+    def calibration_cancel() -> Any:
+        try:
+            return jsonify(runtime.cancel_calibration_test())
+        except RuntimeError as exc:
+            return jsonify({"error": str(exc)}), 409
+
+    @app.post("/api/calibration/open")
+    def calibration_open() -> Any:
+        try:
+            return jsonify(runtime.open_calibration_location())
         except RuntimeError as exc:
             return jsonify({"error": str(exc)}), 503
 

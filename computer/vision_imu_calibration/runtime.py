@@ -7,6 +7,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
+from .calibration_workflow import CalibrationWorkflow
 from .camera_source import OpenCvCameraSource
 from .geometry import KneeAngleResult, calculate_knee_flexion_deg
 from .imu_filter import (
@@ -81,6 +82,7 @@ class VisionRuntime:
         leg_side: LegSide = LegSide.AUTO,
         confidence_threshold: float = 0.30,
         recording_root: str | Path = "recordings",
+        calibration_root: str | Path = "calibration_results",
         imu_source: SerialImuSource | None = None,
         imu_source_factory: Any = SerialImuSource,
         imu_filter: KneeAngleFilterMirror | None = None,
@@ -93,6 +95,10 @@ class VisionRuntime:
             confidence_threshold=float(confidence_threshold),
         )
         self.recorder = AnnotatedVideoRecorder(recording_root)
+        self.calibration = CalibrationWorkflow(calibration_root)
+        self._calibration_timer_cancel: threading.Event | None = None
+        self._calibration_timer_thread: threading.Thread | None = None
+        self._calibration_action_lock = threading.RLock()
         self._imu_source = imu_source
         self._imu_source_factory = imu_source_factory
         self._imu_lock = threading.RLock()
@@ -131,6 +137,10 @@ class VisionRuntime:
             error="",
         )
 
+    def _calibration_locked(self) -> bool:
+        status = self.calibration.status()
+        return status.active or status.state == "ANALYZING"
+
     @property
     def imu_source(self) -> SerialImuSource | None:
         with self._imu_lock:
@@ -140,6 +150,8 @@ class VisionRuntime:
         return list_serial_ports()
 
     def connect_imu(self, port: str, *, baud_rate: int = IMUCAL_BAUD_RATE) -> dict[str, Any]:
+        if self._calibration_locked():
+            raise RuntimeError("Stop the calibration test before changing the IMU serial connection")
         if self.recorder.status().active:
             raise RuntimeError("Stop recording before changing the IMU serial connection")
         clean_port = str(port or "").strip()
@@ -179,6 +191,8 @@ class VisionRuntime:
         return new_source.status()
 
     def disconnect_imu(self) -> dict[str, Any]:
+        if self._calibration_locked():
+            raise RuntimeError("Stop the calibration test before disconnecting the IMU serial source")
         if self.recorder.status().active:
             raise RuntimeError("Stop recording before disconnecting the IMU serial source")
         with self._imu_lock:
@@ -189,6 +203,8 @@ class VisionRuntime:
         return _empty_imu_status()
 
     def reload_imu_filter(self) -> dict[str, Any]:
+        if self._calibration_locked():
+            raise RuntimeError("Stop the calibration test before reloading the IMU filter configuration")
         if self.recorder.status().active:
             raise RuntimeError("Stop recording before reloading the IMU filter configuration")
         if self._imu_filter_config_path is None:
@@ -250,6 +266,8 @@ class VisionRuntime:
         }
 
     def update_camera_profile(self, profile_name: str) -> dict[str, Any]:
+        if self._calibration_locked():
+            raise RuntimeError("Stop the calibration test before changing the camera profile")
         if self.recorder.status().active:
             raise RuntimeError("Stop recording before changing the camera profile")
         with self._lock:
@@ -390,6 +408,9 @@ class VisionRuntime:
 
     def stop(self, timeout_s: float = 5.0) -> None:
         self._stop_event.set()
+        timer_cancel = self._calibration_timer_cancel
+        if timer_cancel is not None:
+            timer_cancel.set()
         thread = self._thread
         if thread is not None and thread.is_alive():
             thread.join(timeout=max(0.0, float(timeout_s)))
@@ -417,6 +438,7 @@ class VisionRuntime:
         payload["imu"] = source.status() if source is not None else _empty_imu_status()
         payload["imu_estimator"] = self.imu_estimator_status()
         payload["camera"] = self.camera_status()
+        payload["calibration"] = asdict(self.calibration.status())
         return payload
 
     def tuning(self) -> dict[str, Any]:
@@ -424,6 +446,8 @@ class VisionRuntime:
             return self._tuning.to_dict()
 
     def update_tuning(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        if self._calibration_locked():
+            raise RuntimeError("Stop the calibration test before changing pose-reference tuning")
         with self._lock:
             self._tuning = RuntimeTuning.from_mapping(payload, current=self._tuning)
             self._status = RuntimeStatus(
@@ -435,6 +459,8 @@ class VisionRuntime:
             return self._tuning.to_dict()
 
     def start_recording(self) -> dict[str, Any]:
+        if self._calibration_locked():
+            raise RuntimeError("A calibration test is already recording")
         with self._lock:
             tuning = self._tuning.to_dict()
             tuning["pose_backend"] = getattr(self.estimator, "description", type(self.estimator).__name__)
@@ -460,7 +486,119 @@ class VisionRuntime:
                     raise
         return asdict(self.recorder.status())
 
+    def start_calibration_test(self, test_type: str) -> dict[str, Any]:
+        with self._calibration_action_lock:
+            if self.recorder.status().active:
+                raise RuntimeError("Stop the current recording before starting calibration")
+            status = self.status()
+            imu = status.get("imu", {})
+            if not imu.get("connected") or not imu.get("capture_active"):
+                raise RuntimeError("Connect the UNO R4 IMU stream before starting calibration")
+            if not imu.get("thigh_ready") or not imu.get("shank_ready"):
+                raise RuntimeError("Both thigh and shank IMUs must be READY")
+            if not status.get("tracking_valid"):
+                raise RuntimeError("Vision tracking must be VALID before the test starts")
+
+            with self._imu_filter_lock:
+                base_parameters = self._imu_filter.parameters
+            prepared = self.calibration.prepare_test(
+                test_type,
+                base_parameters=base_parameters,
+            )
+            with self._lock:
+                tuning = self._tuning.to_dict()
+                tuning["pose_backend"] = getattr(
+                    self.estimator, "description", type(self.estimator).__name__
+                )
+                source_description = self.camera.description
+            imu_description = f"{imu.get('port', '')}@{imu.get('baud_rate', '')}"
+            tuning["imu_filter"] = self.imu_estimator_status()
+            run_directory = Path(prepared["run_directory"])
+            try:
+                self.recorder.request_start(
+                    settings=tuning,
+                    source=source_description,
+                    imu_source=imu_description,
+                    output_root=run_directory,
+                    session_name_prefix=f"{prepared['test_type']}_test",
+                    extra_metadata={
+                        "recording_purpose": "vision_imu_filter_calibration",
+                        "calibration_test_type": prepared["test_type"],
+                        "automatic_duration_s": prepared["duration_s"],
+                    },
+                )
+            except Exception as exc:
+                try:
+                    self.recorder.stop()
+                except Exception:
+                    pass
+                self.calibration.fail(f"Could not start calibration recording: {exc}")
+                raise
+
+            timer_cancel = threading.Event()
+            previous_cancel = self._calibration_timer_cancel
+            if previous_cancel is not None:
+                previous_cancel.set()
+            self._calibration_timer_cancel = timer_cancel
+            timer_thread = threading.Thread(
+                target=self._calibration_auto_stop,
+                args=(prepared["test_type"], float(prepared["duration_s"]), timer_cancel),
+                name=f"vision-imu-{prepared['test_type']}-calibration-timer",
+                daemon=True,
+            )
+            self._calibration_timer_thread = timer_thread
+            timer_thread.start()
+            return asdict(self.calibration.status())
+
+    def stop_calibration_test(self) -> dict[str, Any]:
+        with self._calibration_action_lock:
+            calibration_status = self.calibration.status()
+            if not calibration_status.active:
+                raise RuntimeError("No calibration test is currently running")
+            timer_cancel = self._calibration_timer_cancel
+            if timer_cancel is not None:
+                timer_cancel.set()
+            recording_status = self.recorder.stop()
+            if recording_status.error:
+                self.calibration.fail(recording_status.error)
+                return asdict(self.calibration.status())
+            return asdict(
+                self.calibration.finish_test(
+                    calibration_status.current_test,
+                    recording_status.archive_path,
+                )
+            )
+
+    def cancel_calibration_test(self) -> dict[str, Any]:
+        with self._calibration_action_lock:
+            timer_cancel = self._calibration_timer_cancel
+            if timer_cancel is not None:
+                timer_cancel.set()
+            if self.recorder.status().active:
+                self.recorder.stop()
+            return asdict(self.calibration.cancel_test())
+
+    def open_calibration_location(self) -> dict[str, str]:
+        return {"path": self.calibration.open_output_location()}
+
+    def _calibration_auto_stop(
+        self,
+        test_type: str,
+        duration_s: float,
+        cancel_event: threading.Event,
+    ) -> None:
+        if cancel_event.wait(max(0.0, duration_s)):
+            return
+        try:
+            current = self.calibration.status()
+            if current.active and current.current_test == test_type:
+                self.stop_calibration_test()
+        except Exception as exc:
+            self.calibration.fail(str(exc))
+
     def stop_recording(self) -> dict[str, Any]:
+        if self.calibration.status().active:
+            raise RuntimeError("Use the calibration stop control for an active calibration test")
         return asdict(self.recorder.stop())
 
     def open_recordings_location(self) -> dict[str, str]:
