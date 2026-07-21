@@ -14,6 +14,7 @@ from .imu_filter import (
     KneeAngleFilterParameters,
     resolve_filter_config_path,
 )
+from .imu_bridge import BridgeImuSource
 from .imu_serial import IMUCAL_BAUD_RATE, SerialImuSource
 from .models import LegSide
 from .pose_estimator import MoveNetThunderPoseEstimator
@@ -55,7 +56,16 @@ def build_parser() -> argparse.ArgumentParser:
         default=Path("calibration_results"),
         help="Folder for guided static/dynamic calibration runs and recommended settings",
     )
-    parser.add_argument("--imu-port", help="UNO R4 calibration serial port, e.g. COM3")
+    parser.add_argument(
+        "--imu-transport",
+        choices=("auto", "serial", "uno-q-bridge", "none"),
+        default="auto",
+        help=(
+            "IMU source. auto preserves the PC workflow: serial when --imu-port is set, "
+            "otherwise manual GUI connection. uno-q-bridge is for Phase 2 on UNO Q Linux."
+        ),
+    )
+    parser.add_argument("--imu-port", help="Calibration serial port, e.g. COM3")
     parser.add_argument("--imu-baud", type=int, default=IMUCAL_BAUD_RATE)
     parser.add_argument(
         "--filter-config",
@@ -95,11 +105,19 @@ def main(argv: list[str] | None = None) -> int:
         num_threads=args.inference_threads,
         smart_crop=not args.no_smart_crop,
     )
-    imu_source = (
-        SerialImuSource(args.imu_port, baud_rate=args.imu_baud)
-        if args.imu_port
-        else None
-    )
+    imu_transport = args.imu_transport
+    if imu_transport == "auto":
+        imu_transport = "serial" if args.imu_port else "none"
+    if imu_transport == "serial":
+        if not args.imu_port:
+            raise SystemExit("--imu-transport serial requires --imu-port")
+        imu_source = SerialImuSource(args.imu_port, baud_rate=args.imu_baud)
+    elif imu_transport == "uno-q-bridge":
+        if args.imu_port:
+            raise SystemExit("--imu-port cannot be combined with --imu-transport uno-q-bridge")
+        imu_source = BridgeImuSource()
+    else:
+        imu_source = None
     filter_config_path = resolve_filter_config_path(args.filter_config)
     filter_parameters = KneeAngleFilterParameters.load_yaml(filter_config_path)
     imu_filter = KneeAngleFilterMirror(filter_parameters)
@@ -120,7 +138,13 @@ def main(argv: list[str] | None = None) -> int:
     url = f"http://{url_host}:{args.port}"
     print(f"Vision–IMU calibration prototype: {url}")
     print(f"Pose backend: {estimator.description}")
-    print(f"IMU serial: {args.imu_port or 'manual GUI connection'}")
+    if imu_transport == "uno-q-bridge":
+        imu_description = "UNO Q Arduino Bridge"
+    elif imu_transport == "serial":
+        imu_description = f"USB serial {args.imu_port}"
+    else:
+        imu_description = "manual GUI serial connection"
+    print(f"IMU source: {imu_description}")
     print(f"IMU filter config: {filter_config_path}")
     print("Stop with Ctrl+C.")
     if not args.no_browser:

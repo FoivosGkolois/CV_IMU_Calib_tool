@@ -67,3 +67,49 @@ After the validation passes, the existing GUI can use the UNO Q COM port without
 ```
 
 The standalone acquisition path remains separate from the production exoskeleton firmware so the migration cannot modify the established production telemetry or control lifecycle.
+
+## UNO Q migration — Phase 2
+
+Phase 2 moves the full host application onto the UNO Q Linux processor:
+
+```text
+UNO Q MCU   -> reads both IMUs at 100 Hz
+Arduino Bridge -> transfers the same raw sample contract internally
+UNO Q Linux -> MoveNet, filtering, synchronization, GUI, recording, and calibration
+PC browser  -> only displays and controls the web GUI over Wi-Fi/Ethernet
+```
+
+The original Windows + UNO R4 workflow and the Windows + UNO Q Phase 1 workflow remain available.
+
+Build the self-contained App Lab package from Windows:
+
+```text
+13_BUILD_UNO_Q_PHASE2_APP.bat
+```
+
+This creates:
+
+```text
+uno_q_phase2_app_ready.zip
+```
+
+Open/import the generated App in Arduino App Lab. The App contains:
+
+- the Phase 2 MCU Bridge sketch,
+- the current Python package and MoveNet model,
+- Python dependencies,
+- the web port definition for port 8765.
+
+After the App starts, open:
+
+```text
+http://<UNO-Q-IP>:8765
+```
+
+Recordings and calibration outputs are written under:
+
+```text
+~/vision_imu_data/
+```
+
+Phase 2 intentionally does not add motor control. The MCU remains dedicated to deterministic sensor acquisition, and Linux owns the heavy processing and experiment workflow.

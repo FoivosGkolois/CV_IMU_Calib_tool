@@ -70,3 +70,7 @@ computer/vision_imu_calibration/models/*.tflite
 vision_calibration_recordings/
 recordings/
 calibration_results/
+
+# Generated UNO Q Phase 2 App Lab payload
+uno_q_phase2_app_ready/
+uno_q_phase2_app_ready.zip

@@ -292,3 +292,16 @@ calibration_overview.png
 The export path in the GUI is clickable and opens the local calibration folder. If tracking, synchronization, sample continuity, stillness, or movement range do not pass the quality gates, the tool exports an invalid report but does not create a recommendation YAML.
 
 The generated settings are **data-driven recommendations for the recorded setup**, not certified ground-truth parameters. They must still be reviewed before being copied into the production configuration.
+
+## UNO Q Phase 2 transport
+
+The runtime now supports two interchangeable IMU transports:
+
+```text
+USB serial       --imu-transport serial --imu-port COMx
+UNO Q Bridge     --imu-transport uno-q-bridge
+```
+
+`BridgeImuSource` preserves the existing `ImuCalibrationSample` contract, so pose processing, filtering, synchronization, recording, guided static/dynamic tests, and exported settings do not depend on the transport.
+
+For UNO Q deployment, run `13_BUILD_UNO_Q_PHASE2_APP.bat` from the project root and open the generated App in Arduino App Lab.

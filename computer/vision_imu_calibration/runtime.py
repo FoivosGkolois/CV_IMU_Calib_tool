@@ -37,6 +37,7 @@ def _empty_imu_status() -> dict[str, Any]:
         "capture_active": False,
         "port": "",
         "baud_rate": 0,
+        "transport": "none",
         "state": "DISCONNECTED",
         "sample_rate_hz": 0.0,
         "sample_count": 0,
@@ -83,7 +84,7 @@ class VisionRuntime:
         confidence_threshold: float = 0.30,
         recording_root: str | Path = "recordings",
         calibration_root: str | Path = "calibration_results",
-        imu_source: SerialImuSource | None = None,
+        imu_source: Any | None = None,
         imu_source_factory: Any = SerialImuSource,
         imu_filter: KneeAngleFilterMirror | None = None,
         imu_filter_config_path: str | Path | None = None,
@@ -142,7 +143,7 @@ class VisionRuntime:
         return status.active or status.state == "ANALYZING"
 
     @property
-    def imu_source(self) -> SerialImuSource | None:
+    def imu_source(self) -> Any | None:
         with self._imu_lock:
             return self._imu_source
 
@@ -154,6 +155,11 @@ class VisionRuntime:
             raise RuntimeError("Stop the calibration test before changing the IMU serial connection")
         if self.recorder.status().active:
             raise RuntimeError("Stop recording before changing the IMU serial connection")
+        current = self.imu_source
+        if current is not None and not bool(getattr(current, "replaceable_by_serial", True)):
+            raise RuntimeError(
+                "UNO Q Bridge is managed by the Phase 2 launcher and cannot be replaced from the COM controls"
+            )
         clean_port = str(port or "").strip()
         if not clean_port:
             raise ValueError("Select a serial port before connecting")
@@ -175,7 +181,7 @@ class VisionRuntime:
             with self._imu_lock:
                 if self._imu_source is new_source:
                     self._imu_source = None
-            raise RuntimeError(f"UNO R4 did not answer on {clean_port} within 5 seconds")
+            raise RuntimeError(f"IMU device did not answer on {clean_port} within 5 seconds")
         start_capture = getattr(new_source, "start_capture", None)
         if callable(start_capture):
             try:
@@ -195,6 +201,11 @@ class VisionRuntime:
             raise RuntimeError("Stop the calibration test before disconnecting the IMU serial source")
         if self.recorder.status().active:
             raise RuntimeError("Stop recording before disconnecting the IMU serial source")
+        current = self.imu_source
+        if current is not None and not bool(getattr(current, "replaceable_by_serial", True)):
+            raise RuntimeError(
+                "UNO Q Bridge is managed by the Phase 2 launcher; stop the App instead"
+            )
         with self._imu_lock:
             source, self._imu_source = self._imu_source, None
         if source is not None:
@@ -361,7 +372,7 @@ class VisionRuntime:
             )
             self._imu_thread.start()
 
-    def _activate_existing_imu_source(self, source: SerialImuSource) -> None:
+    def _activate_existing_imu_source(self, source: Any) -> None:
         try:
             wait_until_connected = getattr(source, "wait_until_connected", None)
             if callable(wait_until_connected) and not wait_until_connected(timeout_s=5.0):
@@ -387,7 +398,7 @@ class VisionRuntime:
                 threading.Thread(
                     target=self._activate_existing_imu_source,
                     args=(source,),
-                    name="vision-imu-serial-activate",
+                    name="vision-imu-source-activate",
                     daemon=True,
                 ).start()
             self._ensure_imu_thread()
@@ -458,6 +469,12 @@ class VisionRuntime:
             )
             return self._tuning.to_dict()
 
+    @staticmethod
+    def _format_imu_description(status: Mapping[str, Any]) -> str:
+        port = str(status.get("port", "") or "")
+        baud_rate = int(status.get("baud_rate", 0) or 0)
+        return f"{port}@{baud_rate}" if port and baud_rate > 0 else port
+
     def start_recording(self) -> dict[str, Any]:
         if self._calibration_locked():
             raise RuntimeError("A calibration test is already recording")
@@ -469,7 +486,7 @@ class VisionRuntime:
             imu_source = self.imu_source
             if imu_source is not None:
                 imu_status = imu_source.status()
-                imu_description = f"{imu_status['port']}@{imu_status['baud_rate']}"
+                imu_description = self._format_imu_description(imu_status)
         tuning["imu_filter"] = self.imu_estimator_status()
         self.recorder.request_start(
             settings=tuning,
@@ -493,7 +510,7 @@ class VisionRuntime:
             status = self.status()
             imu = status.get("imu", {})
             if not imu.get("connected") or not imu.get("capture_active"):
-                raise RuntimeError("Connect the UNO R4 IMU stream before starting calibration")
+                raise RuntimeError("Connect the IMU source before starting calibration")
             if not imu.get("thigh_ready") or not imu.get("shank_ready"):
                 raise RuntimeError("Both thigh and shank IMUs must be READY")
             if not status.get("tracking_valid"):
@@ -511,7 +528,7 @@ class VisionRuntime:
                     self.estimator, "description", type(self.estimator).__name__
                 )
                 source_description = self.camera.description
-            imu_description = f"{imu.get('port', '')}@{imu.get('baud_rate', '')}"
+            imu_description = self._format_imu_description(imu)
             tuning["imu_filter"] = self.imu_estimator_status()
             run_directory = Path(prepared["run_directory"])
             try:

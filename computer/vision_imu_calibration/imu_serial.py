@@ -143,6 +143,9 @@ def list_serial_ports(list_ports_module: Any | None = None) -> list[dict[str, st
 class SerialImuSource:
     """Background pyserial source with bounded buffering and command ACKs."""
 
+    transport = "serial"
+    replaceable_by_serial = True
+
     def __init__(
         self,
         port: str | None,
@@ -243,7 +246,7 @@ class SerialImuSource:
 
     def status(self) -> dict[str, Any]:
         with self._lock:
-            return asdict(
+            payload = asdict(
                 ImuSerialStatus(
                     configured=self.configured,
                     connected=self._connected_event.is_set(),
@@ -262,6 +265,8 @@ class SerialImuSource:
                     last_error=self._last_error,
                 )
             )
+        payload["transport"] = self.transport
+        return payload
 
     def _run(self) -> None:
         try:

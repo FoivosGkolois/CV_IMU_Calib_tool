@@ -150,7 +150,7 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
   </div>
 
   <div class="card wide resizable-box" data-resize-id="imu-stream-card">
-    <div class="label">UNO R4 raw IMU stream</div>
+    <div class="label">Raw IMU source</div>
     <div id="imuState" class="value small">DISCONNECTED</div>
     <div class="inline-grid"><select id="imuPort"><option value="">Select COM port</option></select><button class="secondary" onclick="refreshImuPorts()">Refresh</button></div>
     <div class="button-grid"><button id="imuConnect" class="primary" onclick="connectImu()">Connect</button><button id="imuDisconnect" class="stop" onclick="disconnectImu()">Disconnect</button></div>
@@ -568,7 +568,7 @@ async function refresh(){
     const imu=s.imu||{};
     imuState.textContent=imu.configured?(imu.state||'UNKNOWN'):'DISCONNECTED';
     imuState.className='value small '+(imu.connected?'ok':(imu.configured?'bad':''));
-    imuRate.textContent='Rate: '+Number(imu.sample_rate_hz||0).toFixed(1)+' Hz · Port: '+(imu.port||'—');
+    imuRate.textContent='Rate: '+Number(imu.sample_rate_hz||0).toFixed(1)+' Hz · Source: '+(imu.port||'—');
     imuSensors.textContent='Thigh: '+(imu.thigh_ready?'READY':'NOT READY')+' · Shank: '+(imu.shank_ready?'READY':'NOT READY');
     imuHealth.textContent='Samples: '+Number(imu.sample_count||0)+' · Gaps: '+Number(imu.sequence_gaps||0)+' · Parse errors: '+Number(imu.parse_errors||0)+' · Queue drops: '+Number(imu.queue_drops||0);
     if(imu.last_error) imuHealth.textContent+=' · Error: '+imu.last_error;
@@ -584,8 +584,11 @@ async function refresh(){
     imuFilterInfo.textContent='Config: '+(est.config_path||'defaults')+' · axis '+(params.rotation_axis_name||'—')+' · α '+Number(params.alpha_stable||0).toFixed(3)+' / '+Number(params.alpha_dynamic||0).toFixed(3)+' · offset '+Number(params.straight_leg_offset_deg||0).toFixed(1)+'°';
     const calibrationLocked=Boolean((s.calibration||{}).active)||(s.calibration||{}).state==='ANALYZING';
     reloadImuFilter.disabled=Boolean((s.recording||{}).active)||calibrationLocked;
-    imuConnect.disabled=Boolean(imu.configured)||Boolean((s.recording||{}).active)||calibrationLocked;
-    imuDisconnect.disabled=!Boolean(imu.configured)||Boolean((s.recording||{}).active)||calibrationLocked;
+    const bridgeManaged=imu.transport==='uno-q-bridge';
+    imuConnect.disabled=bridgeManaged||Boolean(imu.configured)||Boolean((s.recording||{}).active)||calibrationLocked;
+    imuDisconnect.disabled=bridgeManaged||!Boolean(imu.configured)||Boolean((s.recording||{}).active)||calibrationLocked;
+    imuPort.disabled=bridgeManaged;
+    if(bridgeManaged) imuMessage.textContent='UNO Q Bridge is active; IMU data stays inside the board.';
     if(imu.port && [...imuPort.options].some(o=>o.value===imu.port)) imuPort.value=imu.port;
     const camera=s.camera||{};
     if(!window.cameraProfileLoaded && camera.profile){ cameraProfile.value=camera.profile; window.cameraProfileLoaded=true; }
