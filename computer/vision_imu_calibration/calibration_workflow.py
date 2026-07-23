@@ -39,6 +39,7 @@ class CalibrationStatus:
     static_archive_path: str
     dynamic_archive_path: str
     recommendation_path: str
+    recommended_parameters: dict[str, Any]
     report_path: str
     overview_path: str
     valid: bool
@@ -83,6 +84,7 @@ class CalibrationWorkflow:
         self._static_archive: Path | None = None
         self._dynamic_archive: Path | None = None
         self._recommendation_path: Path | None = None
+        self._recommended_parameters: dict[str, Any] = {}
         self._report_path: Path | None = None
         self._overview_path: Path | None = None
         self._base_parameters: KneeAngleFilterParameters | None = None
@@ -113,6 +115,7 @@ class CalibrationWorkflow:
                     )
                 self._dynamic_archive = None
                 self._recommendation_path = None
+                self._recommended_parameters = {}
                 self._report_path = None
                 self._overview_path = None
                 self._valid = False
@@ -178,6 +181,7 @@ class CalibrationWorkflow:
 
         with self._lock:
             self._recommendation_path = _optional_path(result.get("recommendation_path"))
+            self._recommended_parameters = dict(result.get("recommended_parameters") or {})
             self._report_path = _optional_path(result.get("report_path"))
             self._overview_path = _optional_path(result.get("overview_path"))
             self._valid = bool(result.get("valid"))
@@ -208,6 +212,7 @@ class CalibrationWorkflow:
             self._duration_s = 0.0
             self._state = "FAILED"
             self._valid = False
+            self._recommended_parameters = {}
             self._error = str(error)
             self._message = "Calibration failed. Review the error and repeat the affected test."
             return self._status_locked()
@@ -249,6 +254,7 @@ class CalibrationWorkflow:
         self._static_archive = None
         self._dynamic_archive = None
         self._recommendation_path = None
+        self._recommended_parameters = {}
         self._report_path = None
         self._overview_path = None
         self._base_parameters = base_parameters
@@ -276,6 +282,7 @@ class CalibrationWorkflow:
             static_archive_path=str(self._static_archive or ""),
             dynamic_archive_path=str(self._dynamic_archive or ""),
             recommendation_path=str(self._recommendation_path or ""),
+            recommended_parameters=dict(self._recommended_parameters),
             report_path=str(self._report_path or ""),
             overview_path=str(self._overview_path or ""),
             valid=self._valid,
@@ -329,6 +336,7 @@ def analyze_calibration_run(
             "report_path": str(report_path),
             "overview_path": str(overview_path),
             "recommendation_path": "",
+            "recommended_parameters": {},
         }
 
     static_result = _derive_static_parameters(static_data, base_parameters)
@@ -411,6 +419,7 @@ def analyze_calibration_run(
         "report_path": str(report_path),
         "overview_path": str(overview_path),
         "recommendation_path": str(recommendation_path),
+        "recommended_parameters": _parameter_payload(recommended_parameters),
     }
 
 

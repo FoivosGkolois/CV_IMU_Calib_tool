@@ -120,6 +120,7 @@ def test_analysis_exports_loadable_recommended_settings(tmp_path: Path) -> None:
     )
 
     assert result["valid"] is True
+    assert result["recommended_parameters"]["relative_angle_sign"] == pytest.approx(1.0)
     recommendation = Path(result["recommendation_path"])
     report_path = Path(result["report_path"])
     overview = Path(result["overview_path"])

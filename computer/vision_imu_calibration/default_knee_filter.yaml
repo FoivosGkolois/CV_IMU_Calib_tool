@@ -13,7 +13,7 @@ stm32_control:
     acc_axis_2_sign: 1.0
     thigh_offset_deg: 0.0
     shank_offset_deg: 0.0
-    relative_angle_sign: 1.0
+    relative_angle_sign: -1.0
     straight_leg_offset_deg: 0.0
     gyro_deadband_deg_s: 1.0
     thigh_gyro_bias_deg_s: 0.0

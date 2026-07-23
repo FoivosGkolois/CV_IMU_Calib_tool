@@ -51,6 +51,10 @@ def test_runtime_tuning_rejects_invalid_values(field: str, value: object) -> Non
         RuntimeTuning.from_mapping({field: value})
 
 
+def test_default_tracking_side_is_right() -> None:
+    assert RuntimeTuning().leg_side is LegSide.RIGHT
+
+
 def test_default_frame_rotation_matches_portrait_mounting() -> None:
     from computer.vision_imu_calibration.tuning import FrameRotation, RuntimeTuning
 

@@ -23,7 +23,7 @@ class RuntimeTuning:
     rejection before display and recording.
     """
 
-    leg_side: LegSide = LegSide.AUTO
+    leg_side: LegSide = LegSide.RIGHT
     frame_rotation: FrameRotation = FrameRotation.COUNTERCLOCKWISE_90
     confidence_threshold: float = 0.30
     landmark_smoothing: float = 0.55

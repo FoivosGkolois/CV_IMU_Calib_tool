@@ -58,6 +58,7 @@ def test_loads_current_stm32_knee_angle_parameters() -> None:
     assert params.rotation_axis == 0
     assert params.gyro_rate_sign == pytest.approx(1.0)
     assert params.acc_axis_1_sign == pytest.approx(-1.0)
+    assert params.relative_angle_sign == pytest.approx(-1.0)
     assert params.alpha_stable == pytest.approx(0.9)
     assert params.alpha_dynamic == pytest.approx(0.975)
 

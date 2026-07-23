@@ -27,7 +27,7 @@ def build_parser() -> argparse.ArgumentParser:
     source = parser.add_mutually_exclusive_group()
     source.add_argument("--camera", type=int, default=0, help="OpenCV camera index (default: 0)")
     source.add_argument("--video", type=Path, help="Replay a video file instead of using a webcam")
-    parser.add_argument("--leg", choices=[side.value for side in LegSide], default=LegSide.AUTO.value)
+    parser.add_argument("--leg", choices=[side.value for side in LegSide], default=LegSide.RIGHT.value)
     parser.add_argument("--model", type=Path, default=DEFAULT_TARGET)
     parser.add_argument("--confidence", type=float, default=0.30)
     parser.add_argument("--inference-threads", type=int, default=4)

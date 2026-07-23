@@ -80,7 +80,7 @@ class VisionRuntime:
         camera: OpenCvCameraSource,
         estimator: PoseEstimator,
         *,
-        leg_side: LegSide = LegSide.AUTO,
+        leg_side: LegSide = LegSide.RIGHT,
         confidence_threshold: float = 0.30,
         recording_root: str | Path = "recordings",
         calibration_root: str | Path = "calibration_results",

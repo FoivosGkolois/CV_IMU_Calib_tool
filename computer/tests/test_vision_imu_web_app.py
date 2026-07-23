@@ -162,6 +162,21 @@ def test_page_makes_live_plot_and_all_main_cards_user_resizable() -> None:
     assert ".resizable-box { resize:both" in html
     assert ".chart-card { padding:12px; height:270px" in html
     assert "Reset all box sizes" in html
+    assert 'data-resize-id="imu-recommendations"' in html
+
+
+def test_page_hides_serial_controls_for_bridge_and_renders_recommendations() -> None:
+    runtime = FakeRuntime()
+    app = create_app(runtime)  # type: ignore[arg-type]
+    html = app.test_client().get("/").get_data(as_text=True)
+
+    assert 'id="imuSerialControls"' in html
+    assert "imuSerialControls.hidden=bridgeManaged" in html
+    assert "else if(!window.imuPortsLoaded) refreshImuPorts()" in html
+    assert "refresh(); refreshHistory(); resizeVideoShell(false)" in html
+    assert 'id="imuRecommendationState"' in html
+    assert 'id="imuRecommendationValues"' in html
+    assert "recommended_parameters" in html
 
 
 def test_guided_calibration_endpoints_and_countdown_ui() -> None:

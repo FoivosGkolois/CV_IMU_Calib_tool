@@ -67,6 +67,8 @@ button:disabled { opacity:.45; cursor:not-allowed; }
 .metric .name { color:var(--muted); font-size:9px; text-transform:uppercase; letter-spacing:.07em; }
 .metric .number { margin-top:4px; font-size:16px; font-weight:700; overflow-wrap:anywhere; }
 .chart-card { padding:12px; height:270px; min-width:280px; min-height:210px; max-width:100%; overflow:hidden; }
+.recommendation-card { padding:11px 12px; min-width:280px; min-height:76px; }
+.recommendation-values { margin-top:6px; color:#d8e3f4; font-size:11px; line-height:1.5; overflow-wrap:anywhere; }
 .chart-shell { height:calc(100% - 48px); min-height:140px; margin-top:8px; }
 .chart-shell canvas { width:100%; height:100%; display:block; background:#0a101a; border-radius:9px; }
 .layout-tools { display:grid; gap:8px; }
@@ -123,6 +125,11 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
     <div class="note">Blue: visual reference · Green: IMU estimate. Live display only; calibration scoring runs offline after both tests.</div>
     <div class="chart-shell"><canvas id="angleChart"></canvas></div>
   </div>
+  <div class="recommendation-card card resizable-box" data-resize-id="imu-recommendations">
+    <div class="label">Recommended IMU filter settings</div>
+    <div id="imuRecommendationState" class="note">Run the static and dynamic calibration tests to generate data-driven settings.</div>
+    <div id="imuRecommendationValues" class="recommendation-values"></div>
+  </div>
 </section>
 <aside class="control-panel">
   <div class="card priority wide calibration-card resizable-box" data-resize-id="calibration-card">
@@ -152,8 +159,10 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
   <div class="card wide resizable-box" data-resize-id="imu-stream-card">
     <div class="label">Raw IMU source</div>
     <div id="imuState" class="value small">DISCONNECTED</div>
-    <div class="inline-grid"><select id="imuPort"><option value="">Select COM port</option></select><button class="secondary" onclick="refreshImuPorts()">Refresh</button></div>
-    <div class="button-grid"><button id="imuConnect" class="primary" onclick="connectImu()">Connect</button><button id="imuDisconnect" class="stop" onclick="disconnectImu()">Disconnect</button></div>
+    <div id="imuSerialControls">
+      <div class="inline-grid"><select id="imuPort"><option value="">Select COM port</option></select><button class="secondary" onclick="refreshImuPorts()">Refresh</button></div>
+      <div class="button-grid"><button id="imuConnect" class="primary" onclick="connectImu()">Connect</button><button id="imuDisconnect" class="stop" onclick="disconnectImu()">Disconnect</button></div>
+    </div>
     <div id="imuMessage" class="note">Continuous 100 Hz acquisition; recording decides whether samples enter the final ZIP.</div>
     <div id="imuRate" class="note">Rate: 0.0 Hz · Port: —</div>
     <div id="imuSensors" class="note">Thigh: NOT READY · Shank: NOT READY</div>
@@ -281,6 +290,7 @@ const imuState=document.getElementById('imuState');
 const imuRate=document.getElementById('imuRate');
 const imuSensors=document.getElementById('imuSensors');
 const imuHealth=document.getElementById('imuHealth');
+const imuSerialControls=document.getElementById('imuSerialControls');
 const imuPort=document.getElementById('imuPort');
 const imuConnect=document.getElementById('imuConnect');
 const imuDisconnect=document.getElementById('imuDisconnect');
@@ -294,6 +304,8 @@ const angleDifference=document.getElementById('angleDifference');
 const imuSpeed=document.getElementById('imuSpeed');
 const segmentAngles=document.getElementById('segmentAngles');
 const imuFilterInfo=document.getElementById('imuFilterInfo');
+const imuRecommendationState=document.getElementById('imuRecommendationState');
+const imuRecommendationValues=document.getElementById('imuRecommendationValues');
 const reloadImuFilter=document.getElementById('reloadImuFilter');
 const angleChart=document.getElementById('angleChart');
 const videoShell=document.getElementById('videoShell');
@@ -410,8 +422,9 @@ async function refreshImuPorts(){
       imuPort.appendChild(option);
     }
     if([...imuPort.options].some(o=>o.value===selected)) imuPort.value=selected;
+    window.imuPortsLoaded=true;
     imuMessage.textContent=(body.ports||[]).length?`${body.ports.length} serial port(s) found.`:'No serial ports found.';
-  } catch(e) { imuMessage.textContent='Port scan failed: '+e; }
+  } catch(e) { window.imuPortsLoaded=true; imuMessage.textContent='Port scan failed: '+e; }
 }
 async function connectImu(){
   if(!imuPort.value){ imuMessage.textContent='Select a COM port first.'; return; }
@@ -551,6 +564,24 @@ function drawAngleChart(rows){
   ctx.fillStyle='#91a4bf'; ctx.font='10px Segoe UI'; ctx.fillText('−15 s',left,height-8); ctx.fillText('now',width-right-22,height-8);
 }
 async function refreshHistory(){ try{ const r=await fetch('/api/acquisition/history?seconds=15&max_points=300',{cache:'no-store'}); const body=await r.json(); if(r.ok){ window.latestAngleRows=body.rows||[]; drawAngleChart(window.latestAngleRows); } }catch(e){} }
+function updateImuRecommendations(cal){
+  const p=(cal&&cal.recommended_parameters)||{};
+  if(cal&&cal.valid&&Object.keys(p).length){
+    imuRecommendationState.textContent='Generated from the completed static and dynamic tests.';
+    imuRecommendationState.className='note ok';
+    imuRecommendationValues.textContent=
+      `α stable ${Number(p.alpha_stable).toFixed(3)} · α dynamic ${Number(p.alpha_dynamic).toFixed(3)} · `+
+      `deadband ${Number(p.gyro_deadband_deg_s).toFixed(2)}°/s · straight offset ${Number(p.straight_leg_offset_deg).toFixed(2)}° · `+
+      `gyro bias thigh/shank ${Number(p.thigh_gyro_bias_deg_s).toFixed(3)} / ${Number(p.shank_gyro_bias_deg_s).toFixed(3)}°/s · `+
+      `max accel correction ${Number(p.max_accel_correction_deg).toFixed(1)}° · relative sign ${Number(p.relative_angle_sign).toFixed(0)}`;
+    return;
+  }
+  imuRecommendationState.className='note';
+  imuRecommendationValues.textContent='';
+  if(cal&&cal.state==='ANALYZING') imuRecommendationState.textContent='Analyzing both tests and calculating recommended settings…';
+  else if(cal&&(cal.state==='INVALID'||cal.state==='FAILED')) imuRecommendationState.textContent='No valid recommendation was generated. Review the calibration result and repeat the failed test.';
+  else imuRecommendationState.textContent='Run the static and dynamic calibration tests to generate data-driven settings.';
+}
 async function refresh(){
   try {
     const r=await fetch('/api/status',{cache:'no-store'}); const s=await r.json();
@@ -585,10 +616,12 @@ async function refresh(){
     const calibrationLocked=Boolean((s.calibration||{}).active)||(s.calibration||{}).state==='ANALYZING';
     reloadImuFilter.disabled=Boolean((s.recording||{}).active)||calibrationLocked;
     const bridgeManaged=imu.transport==='uno-q-bridge';
+    imuSerialControls.hidden=bridgeManaged;
     imuConnect.disabled=bridgeManaged||Boolean(imu.configured)||Boolean((s.recording||{}).active)||calibrationLocked;
     imuDisconnect.disabled=bridgeManaged||!Boolean(imu.configured)||Boolean((s.recording||{}).active)||calibrationLocked;
     imuPort.disabled=bridgeManaged;
     if(bridgeManaged) imuMessage.textContent='UNO Q Bridge is active; IMU data stays inside the board.';
+    else if(!window.imuPortsLoaded) refreshImuPorts();
     if(imu.port && [...imuPort.options].some(o=>o.value===imu.port)) imuPort.value=imu.port;
     const camera=s.camera||{};
     if(!window.cameraProfileLoaded && camera.profile){ cameraProfile.value=camera.profile; window.cameraProfileLoaded=true; }
@@ -598,6 +631,7 @@ async function refresh(){
     calibrationState.className='value small '+(cal.valid?'ok':(cal.state==='FAILED'||cal.state==='INVALID'?'bad':''));
     calibrationMessage.textContent=cal.error?`${cal.message||''} Error: ${cal.error}`:(cal.message||'Run the static test first, then the dynamic test.');
     calibrationProgress.style.width=(100*Number(cal.progress||0)).toFixed(1)+'%';
+    updateImuRecommendations(cal);
     const calibrationBusy=Boolean(cal.active)||cal.state==='ANALYZING';
     startStaticTest.disabled=calibrationBusy||Boolean((s.recording||{}).active)||!Boolean(imu.connected)||!Boolean(imu.thigh_ready&&imu.shank_ready)||!Boolean(s.tracking_valid);
     startDynamicTest.disabled=calibrationBusy||Boolean((s.recording||{}).active)||!Boolean(cal.static_archive_path)||!Boolean(imu.connected)||!Boolean(imu.thigh_ready&&imu.shank_ready)||!Boolean(s.tracking_valid);
@@ -618,7 +652,7 @@ async function refresh(){
     if(!window.tuningLoaded && s.tuning){ loadTuning(s.tuning); window.tuningLoaded=true; }
   } catch(e) { runtime.textContent='UI connection error: '+e; }
 }
-setInterval(refresh,350); setInterval(refreshHistory,700); setInterval(()=>resizeVideoShell(false),1500); refresh(); refreshHistory(); refreshImuPorts(); resizeVideoShell(false);
+setInterval(refresh,350); setInterval(refreshHistory,700); setInterval(()=>resizeVideoShell(false),1500); refresh(); refreshHistory(); resizeVideoShell(false);
 </script>
 </body>
 </html>
