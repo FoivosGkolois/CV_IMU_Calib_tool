@@ -30,9 +30,15 @@ def run_vision_imu() -> None:
     main(
         [
             "--camera",
-            os.environ.get("VISION_IMU_CAMERA_INDEX", "0"),
+            os.environ.get("VISION_IMU_CAMERA_INDEX", "auto"),
             "--camera-backend",
-            "default",
+            os.environ.get("VISION_IMU_CAMERA_BACKEND", "auto"),
+            "--width",
+            os.environ.get("VISION_IMU_CAMERA_WIDTH", "640"),
+            "--height",
+            os.environ.get("VISION_IMU_CAMERA_HEIGHT", "480"),
+            "--fps",
+            os.environ.get("VISION_IMU_CAMERA_FPS", "30"),
             "--imu-transport",
             "uno-q-bridge",
             "--host",

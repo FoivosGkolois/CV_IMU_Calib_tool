@@ -16,4 +16,9 @@ After the App starts, open in a PC browser:
 http://<UNO-Q-IP>:8765
 ```
 
-The USB camera must be visible to the UNO Q App. Phase 1 and the original PC workflows remain separate and unchanged.
+The USB camera must be visible to the UNO Q App. The launcher now defaults to
+automatic UVC camera discovery instead of assuming `/dev/video0`. It probes the
+available `/dev/video*` nodes, rejects codec-only devices, and keeps the first node
+that returns a real frame. `VISION_IMU_CAMERA_INDEX` can still force a specific index.
+
+Phase 1 and the original PC workflows remain separate and unchanged.

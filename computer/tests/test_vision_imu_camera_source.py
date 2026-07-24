@@ -105,7 +105,10 @@ def test_camera_open_error_lists_attempted_backends(monkeypatch: pytest.MonkeyPa
         platform_name="Windows",
     )
 
-    with pytest.raises(RuntimeError, match="DSHOW: open failed; MSMF: open failed; DEFAULT: open failed"):
+    with pytest.raises(
+        RuntimeError,
+        match=r"camera:0/DSHOW: open failed; camera:0/MSMF: open failed; camera:0/DEFAULT: open failed",
+    ):
         source.open()
 
 
@@ -167,3 +170,52 @@ def test_camera_reconfigure_reopens_with_new_profile() -> None:
     assert source.read() == ("flipped", "quality", 1)
     assert (cv2.CAP_PROP_FRAME_WIDTH, 1280) in second.set_calls
     assert (cv2.CAP_PROP_FRAME_HEIGHT, 720) in second.set_calls
+
+
+def test_auto_camera_probes_candidates_until_a_real_frame_is_available(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    wrong_device = FakeCapture(opened=False, frames=[])
+    webcam = FakeCapture(opened=True, frames=["uvc-frame"])
+    cv2 = FakeCv2({(2, None): wrong_device, (4, None): webcam})
+    source = OpenCvCameraSource(
+        camera_index="auto",
+        cv2_module=cv2,
+        platform_name="TestOS",
+    )
+    monkeypatch.setattr(source, "_discover_camera_indices", lambda: [2, 4])
+
+    source.open()
+
+    assert cv2.calls == [(2, None), (4, None)]
+    assert source.active_camera_index == 4
+    assert source.description == "camera:4 [DEFAULT]"
+    assert source.read() == ("flipped", "uvc-frame", 1)
+
+
+def test_auto_camera_error_reports_every_attempted_index(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("computer.vision_imu_calibration.camera_source.time.sleep", lambda _: None)
+    cv2 = FakeCv2(
+        {
+            (1, None): FakeCapture(opened=False, frames=[]),
+            (3, None): FakeCapture(opened=False, frames=[]),
+        }
+    )
+    source = OpenCvCameraSource(
+        camera_index="auto",
+        cv2_module=cv2,
+        platform_name="TestOS",
+    )
+    monkeypatch.setattr(source, "_discover_camera_indices", lambda: [1, 3])
+
+    with pytest.raises(RuntimeError, match=r"camera:1/DEFAULT.*camera:3/DEFAULT"):
+        source.open()
+
+
+def test_camera_selector_rejects_invalid_values() -> None:
+    with pytest.raises(ValueError, match="non-negative integer or 'auto'"):
+        OpenCvCameraSource(camera_index="camera-zero")
+    with pytest.raises(ValueError, match="non-negative integer or 'auto'"):
+        OpenCvCameraSource(camera_index=-1)

@@ -106,6 +106,10 @@ After the App starts, open:
 http://<UNO-Q-IP>:8765
 ```
 
+The Phase 2 launcher auto-detects the working UVC capture node instead of assuming
+that the webcam is always `/dev/video0`. An explicit override remains available
+through `VISION_IMU_CAMERA_INDEX`.
+
 Recordings and calibration outputs are written under:
 
 ```text

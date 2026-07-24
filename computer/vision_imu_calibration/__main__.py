@@ -22,10 +22,29 @@ from .runtime import VisionRuntime
 from .web_app import create_app
 
 
+
+def _parse_camera_selector(value: str) -> int | str:
+    normalized = str(value).strip().lower()
+    if normalized == "auto":
+        return "auto"
+    try:
+        index = int(normalized)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("camera must be 'auto' or a non-negative integer") from exc
+    if index < 0:
+        raise argparse.ArgumentTypeError("camera index must be non-negative")
+    return index
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="PC-first Vision–IMU pose visualizer")
     source = parser.add_mutually_exclusive_group()
-    source.add_argument("--camera", type=int, default=0, help="OpenCV camera index (default: 0)")
+    source.add_argument(
+        "--camera",
+        type=_parse_camera_selector,
+        default="auto",
+        help="OpenCV camera index or auto-detect (default: auto)",
+    )
     source.add_argument("--video", type=Path, help="Replay a video file instead of using a webcam")
     parser.add_argument("--leg", choices=[side.value for side in LegSide], default=LegSide.RIGHT.value)
     parser.add_argument("--model", type=Path, default=DEFAULT_TARGET)
@@ -40,9 +59,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--height", type=int, default=480)
     parser.add_argument(
         "--camera-backend",
-        choices=("auto", "dshow", "msmf", "default"),
+        choices=("auto", "dshow", "msmf", "v4l2", "default"),
         default="auto",
-        help="Windows camera backend. Auto prefers DSHOW for faster startup.",
+        help="Camera backend. Auto selects DSHOW/MSMF on Windows and V4L2 on Linux.",
     )
     parser.add_argument("--fps", type=float, default=30.0)
     parser.add_argument("--no-mirror", action="store_true")

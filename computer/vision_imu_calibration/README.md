@@ -64,7 +64,10 @@ auto backend order: DSHOW → MSMF → OpenCV default
 
 MoveNet resizes its input to `256 × 256`, so starting the webcam at 1280 × 720
 does not materially improve pose inference but often increases USB camera negotiation time.
-The active backend is shown in the runtime source field, for example `camera:0 [DSHOW]`.
+The default camera selector is `auto`. The tool tests available camera indices and
+keeps the first source that returns a real frame. On Linux it prioritizes UVC/webcam
+nodes and de-prioritizes internal encoder/decoder devices. The active index and
+backend are shown in the runtime source field, for example `camera:2 [V4L2, MJPG]`.
 
 For a known camera/backend, startup can be made fully deterministic:
 
@@ -72,7 +75,7 @@ For a known camera/backend, startup can be made fully deterministic:
 .venv-vision\Scripts\python.exe -m computer.vision_imu_calibration --camera 0 --camera-backend dshow
 ```
 
-Fallback values are `msmf`, `default`, and `auto`.
+Fallback values are `msmf`, `v4l2`, `default`, and `auto`.
 
 ## Vision-only run
 

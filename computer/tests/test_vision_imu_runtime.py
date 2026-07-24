@@ -427,3 +427,23 @@ def test_runtime_starts_guided_static_calibration_only_when_ready(tmp_path: Path
     assert Path(status["run_directory"]).is_dir()
     cancelled = runtime.cancel_calibration_test()
     assert cancelled["active"] is False
+
+
+class AutoDetectedCamera(ReconfigurableCamera):
+    camera_index = "auto"
+    active_camera_index = 3
+    description = "camera:3 [V4L2, MJPG]"
+
+
+def test_runtime_camera_status_reports_auto_selected_device(tmp_path: Path) -> None:
+    runtime = VisionRuntime(
+        AutoDetectedCamera(),
+        FakeEstimator(),
+        recording_root=tmp_path,
+    )  # type: ignore[arg-type]
+
+    camera = runtime.camera_status()
+
+    assert camera["selector"] == "auto"
+    assert camera["active_index"] == 3
+    assert camera["source"] == "camera:3 [V4L2, MJPG]"

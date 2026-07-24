@@ -265,6 +265,9 @@ class VisionRuntime:
         profile = self._camera_profile_values()
         return {
             "profile": self._camera_profile,
+            "selector": getattr(self.camera, "camera_index", None),
+            "active_index": getattr(self.camera, "active_camera_index", None),
+            "source": self.camera.description,
             "width": int(profile["width"]),
             "height": int(profile["height"]),
             "fps": float(profile["fps"]),

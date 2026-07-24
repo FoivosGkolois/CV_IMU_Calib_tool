@@ -12,6 +12,7 @@ def test_cli_accepts_uno_q_bridge_transport_without_serial_port() -> None:
     assert args.imu_transport == "uno-q-bridge"
     assert args.imu_port is None
     assert args.leg == "right"
+    assert args.camera == "auto"
 
 
 def test_phase2_template_uses_headless_opencv_for_app_lab_container() -> None:
@@ -67,3 +68,28 @@ def test_phase2_builder_creates_self_contained_app_payload(tmp_path: Path) -> No
         in names
     )
     assert not any("__pycache__" in name or name.endswith(".pyc") for name in names)
+
+
+def test_cli_accepts_explicit_camera_index_and_v4l2_backend() -> None:
+    args = build_parser().parse_args(["--camera", "3", "--camera-backend", "v4l2"])
+    assert args.camera == 3
+    assert args.camera_backend == "v4l2"
+
+
+def test_phase2_launcher_defaults_to_camera_auto_detection() -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    launcher_path = (
+        project_root
+        / "standalone_tools"
+        / "vision_imu_calibration"
+        / "uno_q_phase2_app_lab_template"
+        / "python"
+        / "main.py"
+    )
+    launcher = launcher_path.read_text(encoding="utf-8")
+
+    assert 'os.environ.get("VISION_IMU_CAMERA_INDEX", "auto")' in launcher
+    assert 'os.environ.get("VISION_IMU_CAMERA_BACKEND", "auto")' in launcher
+    assert 'os.environ.get("VISION_IMU_CAMERA_WIDTH", "640")' in launcher
+    assert 'os.environ.get("VISION_IMU_CAMERA_HEIGHT", "480")' in launcher
+    assert 'os.environ.get("VISION_IMU_CAMERA_FPS", "30")' in launcher
