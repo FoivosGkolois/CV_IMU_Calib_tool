@@ -22,6 +22,11 @@ from .runtime import VisionRuntime
 from .web_app import create_app
 
 
+def resolve_project_root() -> Path:
+    """Return the portable CV_IMU_Calib_tool root from the packaged source location."""
+    return Path(__file__).resolve().parents[2]
+
+
 
 def _parse_camera_selector(value: str) -> int | str:
     normalized = str(value).strip().lower()
@@ -68,13 +73,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--no-browser", action="store_true")
-    parser.add_argument("--recording-root", type=Path, default=Path("recordings"))
-    parser.add_argument(
-        "--calibration-root",
-        type=Path,
-        default=Path("calibration_results"),
-        help="Folder for guided static/dynamic calibration runs and recommended settings",
-    )
     parser.add_argument(
         "--imu-transport",
         choices=("auto", "serial", "uno-q-bridge", "none"),
@@ -140,13 +138,16 @@ def main(argv: list[str] | None = None) -> int:
     filter_config_path = resolve_filter_config_path(args.filter_config)
     filter_parameters = KneeAngleFilterParameters.load_yaml(filter_config_path)
     imu_filter = KneeAngleFilterMirror(filter_parameters)
+    project_root = resolve_project_root()
+    recording_root = project_root / "video_recordings"
+    calibration_root = project_root / "calibration_suggestions"
     runtime = VisionRuntime(
         camera,
         estimator,
         leg_side=LegSide(args.leg),
         confidence_threshold=args.confidence,
-        recording_root=args.recording_root,
-        calibration_root=args.calibration_root,
+        recording_root=recording_root,
+        calibration_root=calibration_root,
         imu_source=imu_source,
         imu_filter=imu_filter,
         imu_filter_config_path=filter_config_path,
@@ -165,6 +166,8 @@ def main(argv: list[str] | None = None) -> int:
         imu_description = "manual GUI serial connection"
     print(f"IMU source: {imu_description}")
     print(f"IMU filter config: {filter_config_path}")
+    print(f"Video recordings: {recording_root}")
+    print(f"Calibration suggestions: {calibration_root}")
     print("Stop with Ctrl+C.")
     if not args.no_browser:
         threading.Thread(target=_open_browser, args=(url,), daemon=True).start()

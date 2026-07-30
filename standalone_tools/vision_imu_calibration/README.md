@@ -110,10 +110,13 @@ The Phase 2 launcher auto-detects the working UVC capture node instead of assumi
 that the webcam is always `/dev/video0`. An explicit override remains available
 through `VISION_IMU_CAMERA_INDEX`.
 
-Recordings and calibration outputs are written under:
+Outputs are owned by the packaged project root with the same portable structure used on PC:
 
 ```text
-~/vision_imu_data/
+video_recordings/
+calibration_suggestions/calibration_run_<timestamp>/
 ```
+
+The normal recorder writes only to `video_recordings`. Static and dynamic calibration stages write their trial archives and one shared `imu_filter_suggestions.yaml` inside the same calibration run directory. Browser links expose project-relative paths rather than machine-specific absolute paths.
 
 Phase 2 intentionally does not add motor control. The MCU remains dedicated to deterministic sensor acquisition, and Linux owns the heavy processing and experiment workflow.

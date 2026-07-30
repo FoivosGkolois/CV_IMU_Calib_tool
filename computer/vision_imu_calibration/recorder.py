@@ -4,8 +4,6 @@ import csv
 import json
 import os
 import shutil
-import subprocess
-import sys
 import tempfile
 import threading
 import time
@@ -114,7 +112,7 @@ class AnnotatedVideoRecorder:
         "filter_reason",
     ]
 
-    def __init__(self, output_root: str | Path = "recordings") -> None:
+    def __init__(self, output_root: str | Path = "video_recordings") -> None:
         self.output_root = Path(output_root)
         self._lock = threading.RLock()
         self._requested = False
@@ -153,6 +151,7 @@ class AnnotatedVideoRecorder:
         self._metadata: dict[str, Any] = {}
         self._session_output_root: Path | None = None
         self._session_name_prefix = "vision_imu_session"
+        self._exact_session_name: str | None = None
         self._extra_metadata: dict[str, Any] = {}
 
     def request_start(
@@ -163,6 +162,7 @@ class AnnotatedVideoRecorder:
         imu_source: str = "",
         output_root: str | Path | None = None,
         session_name_prefix: str = "vision_imu_session",
+        session_name: str | None = None,
         extra_metadata: Mapping[str, Any] | None = None,
     ) -> None:
         with self._lock:
@@ -181,6 +181,16 @@ class AnnotatedVideoRecorder:
                 for character in str(session_name_prefix or "vision_imu_session")
             ).strip("_")
             self._session_name_prefix = clean_prefix or "vision_imu_session"
+            if session_name is None:
+                self._exact_session_name = None
+            else:
+                clean_name = "".join(
+                    character if character.isalnum() or character in {"-", "_"} else "_"
+                    for character in str(session_name)
+                ).strip("_")
+                if not clean_name:
+                    raise ValueError("session_name must contain at least one safe character")
+                self._exact_session_name = clean_name
             self._extra_metadata = dict(extra_metadata or {})
             self._started_monotonic_ns = time.perf_counter_ns()
             self._create_session_locked()
@@ -249,18 +259,9 @@ class AnnotatedVideoRecorder:
             return self._status_locked()
 
     def open_output_location(self) -> str:
-        """Open the recorder output folder on the local desktop OS."""
+        """Return the recorder output folder without invoking a platform-specific shell."""
         output_root = self.output_root.expanduser().resolve()
         output_root.mkdir(parents=True, exist_ok=True)
-        if sys.platform.startswith("win"):
-            startfile = getattr(os, "startfile", None)
-            if startfile is None:
-                raise RuntimeError("Windows folder opening is unavailable in this Python runtime")
-            startfile(str(output_root))
-        elif sys.platform == "darwin":
-            subprocess.Popen(["open", str(output_root)])
-        else:
-            subprocess.Popen(["xdg-open", str(output_root)])
         return str(output_root)
 
     def close(self) -> None:
@@ -294,19 +295,28 @@ class AnnotatedVideoRecorder:
         self._record_fps = 0.0
         self._session_output_root = None
         self._session_name_prefix = "vision_imu_session"
+        self._exact_session_name = None
         self._extra_metadata = {}
 
     def _create_session_locked(self) -> None:
         output_root = self._session_output_root or self.output_root
         output_root.mkdir(parents=True, exist_ok=True)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        session_name = f"{self._session_name_prefix}_{timestamp}"
-        archive_path = output_root / f"{session_name}.zip"
-        suffix = 1
-        while archive_path.exists():
-            session_name = f"{self._session_name_prefix}_{timestamp}_{suffix:02d}"
+        if self._exact_session_name is not None:
+            session_name = self._exact_session_name
             archive_path = output_root / f"{session_name}.zip"
-            suffix += 1
+            if archive_path.exists():
+                raise FileExistsError(
+                    f"Deterministic recording output already exists: {archive_path}"
+                )
+        else:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            session_name = f"{self._session_name_prefix}_{timestamp}"
+            archive_path = output_root / f"{session_name}.zip"
+            suffix = 1
+            while archive_path.exists():
+                session_name = f"{self._session_name_prefix}_{timestamp}_{suffix:02d}"
+                archive_path = output_root / f"{session_name}.zip"
+                suffix += 1
 
         session_dir = Path(tempfile.mkdtemp(prefix=f"{session_name}_"))
         self._session_name = session_name

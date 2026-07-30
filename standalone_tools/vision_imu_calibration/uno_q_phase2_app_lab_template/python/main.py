@@ -9,9 +9,6 @@ from arduino.app_utils import App
 
 APP_PYTHON_ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = APP_PYTHON_ROOT / "project"
-DATA_ROOT = Path(
-    os.environ.get("VISION_IMU_DATA_ROOT", str(Path.home() / "vision_imu_data"))
-).expanduser()
 
 if not (PROJECT_ROOT / "computer" / "vision_imu_calibration" / "__main__.py").is_file():
     raise RuntimeError(
@@ -21,7 +18,6 @@ if not (PROJECT_ROOT / "computer" / "vision_imu_calibration" / "__main__.py").is
 
 sys.path.insert(0, str(PROJECT_ROOT))
 os.chdir(PROJECT_ROOT)
-DATA_ROOT.mkdir(parents=True, exist_ok=True)
 
 
 def run_vision_imu() -> None:
@@ -46,10 +42,6 @@ def run_vision_imu() -> None:
             "--port",
             "8765",
             "--no-browser",
-            "--recording-root",
-            str(DATA_ROOT / "recordings"),
-            "--calibration-root",
-            str(DATA_ROOT / "calibration_results"),
         ]
     )
 

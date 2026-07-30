@@ -6,8 +6,6 @@ import math
 import os
 import shutil
 import statistics
-import subprocess
-import sys
 import threading
 import time
 import zipfile
@@ -24,6 +22,9 @@ STATIC_TEST_DURATION_S = 12.0
 DYNAMIC_TEST_DURATION_S = 25.0
 MAX_SYNC_ERROR_MS = 20.0
 MIN_VISUAL_VALID_FRACTION = 0.70
+SUGGESTIONS_FILENAME = "imu_filter_suggestions.yaml"
+STATIC_ARCHIVE_FILENAME = "static_trial.zip"
+DYNAMIC_ARCHIVE_FILENAME = "dynamic_trial.zip"
 
 
 @dataclass(frozen=True)
@@ -34,11 +35,14 @@ class CalibrationStatus:
     elapsed_s: float
     duration_s: float
     progress: float
+    run_id: str
     run_directory: str
     export_path: str
     static_archive_path: str
     dynamic_archive_path: str
     recommendation_path: str
+    static_suggestion: dict[str, Any]
+    dynamic_suggestion: dict[str, Any]
     recommended_parameters: dict[str, Any]
     report_path: str
     overview_path: str
@@ -72,7 +76,7 @@ class ArchiveData:
 class CalibrationWorkflow:
     """State and offline analysis for the guided static/dynamic calibration tests."""
 
-    def __init__(self, output_root: str | Path = "calibration_results") -> None:
+    def __init__(self, output_root: str | Path = "calibration_suggestions") -> None:
         self.output_root = Path(output_root)
         self._lock = threading.RLock()
         self._state = "IDLE"
@@ -84,12 +88,14 @@ class CalibrationWorkflow:
         self._static_archive: Path | None = None
         self._dynamic_archive: Path | None = None
         self._recommendation_path: Path | None = None
+        self._static_suggestion: dict[str, Any] = {}
+        self._dynamic_suggestion: dict[str, Any] = {}
         self._recommended_parameters: dict[str, Any] = {}
         self._report_path: Path | None = None
         self._overview_path: Path | None = None
         self._base_parameters: KneeAngleFilterParameters | None = None
         self._valid = False
-        self._message = "Run the static test first, then the dynamic test."
+        self._message = "Start calibration with the static stage."
         self._error = ""
 
     def prepare_test(
@@ -107,19 +113,31 @@ class CalibrationWorkflow:
             else:
                 if self._run_directory is None or self._static_archive is None:
                     raise RuntimeError("Complete the static test before starting the dynamic test")
-                if self._state not in {"STATIC_COMPLETE", "INVALID", "FAILED"}:
+                if not self._static_suggestion or self._state not in {"AWAITING_DYNAMIC", "INVALID"}:
                     raise RuntimeError("The current calibration run is not ready for the dynamic test")
                 if self._base_parameters != base_parameters:
                     raise RuntimeError(
                         "The IMU filter settings changed after the static test; repeat the static test"
                     )
                 self._dynamic_archive = None
-                self._recommendation_path = None
-                self._recommended_parameters = {}
+                expected_dynamic = self._run_directory / DYNAMIC_ARCHIVE_FILENAME
+                expected_dynamic.unlink(missing_ok=True)
+                self._dynamic_suggestion = {}
+                self._recommended_parameters = dict(self._static_suggestion)
                 self._report_path = None
                 self._overview_path = None
+                (self._run_directory / "calibration_report.json").unlink(missing_ok=True)
+                (self._run_directory / "calibration_overview.png").unlink(missing_ok=True)
                 self._valid = False
                 self._error = ""
+                _write_suggestions_yaml(
+                    self._run_directory / SUGGESTIONS_FILENAME,
+                    status="awaiting_dynamic",
+                    run_id=self._run_directory.name,
+                    static_suggestion=self._static_suggestion,
+                    dynamic_suggestion=None,
+                    final_parameters=None,
+                )
 
             self._active = True
             self._current_test = test
@@ -137,6 +155,9 @@ class CalibrationWorkflow:
                 "test_type": test,
                 "duration_s": self._duration_s,
                 "run_directory": str(self._run_directory.resolve()),
+                "archive_name": (
+                    STATIC_ARCHIVE_FILENAME if test == "static" else DYNAMIC_ARCHIVE_FILENAME
+                ),
             }
 
     def finish_test(self, test_type: str, archive_path: str | Path) -> CalibrationStatus:
@@ -148,25 +169,64 @@ class CalibrationWorkflow:
         with self._lock:
             if not self._active or self._current_test != test:
                 raise RuntimeError(f"No active {test} calibration test")
+            run_directory = self._run_directory
+            base_parameters = self._base_parameters
+            if run_directory is None or base_parameters is None:
+                raise RuntimeError("Calibration run ownership state is incomplete")
+            expected_name = (
+                STATIC_ARCHIVE_FILENAME if test == "static" else DYNAMIC_ARCHIVE_FILENAME
+            )
+            expected_archive = (run_directory / expected_name).resolve()
+            if archive != expected_archive:
+                raise RuntimeError(
+                    f"Calibration archive must be owned by the active run: {expected_archive}"
+                )
             self._active = False
             self._current_test = ""
             self._started_ns = 0
             self._duration_s = 0.0
             if test == "static":
                 self._static_archive = archive
-                self._state = "STATIC_COMPLETE"
-                self._message = "Static test complete. Start the dynamic test next."
-                return self._status_locked()
-            self._dynamic_archive = archive
-            self._state = "ANALYZING"
-            self._message = "Analyzing both tests and generating recommended settings…"
-            base_parameters = self._base_parameters
-            run_directory = self._run_directory
-            static_archive = self._static_archive
+                self._state = "ANALYZING_STATIC"
+                self._message = "Analyzing the static stage and writing its suggestion…"
+                static_archive = archive
+            else:
+                static_archive = self._static_archive
+                self._dynamic_archive = archive
+                self._state = "ANALYZING"
+                self._message = "Analyzing both stages and completing the shared suggestions file…"
 
-        if base_parameters is None or run_directory is None or static_archive is None:
+        if static_archive is None:
             self.fail("Calibration analysis state is incomplete")
             return self.status()
+
+        if test == "static":
+            try:
+                result = analyze_static_calibration_stage(
+                    static_archive,
+                    base_parameters=base_parameters,
+                    output_directory=run_directory,
+                )
+            except Exception as exc:
+                self.fail(f"Static calibration analysis failed: {exc}", stage="static")
+                return self.status()
+
+            with self._lock:
+                self._recommendation_path = _optional_path(result.get("recommendation_path"))
+                self._report_path = _optional_path(result.get("report_path"))
+                self._static_suggestion = dict(result.get("static_suggestion") or {})
+                self._dynamic_suggestion = {}
+                self._recommended_parameters = dict(self._static_suggestion)
+                self._valid = False
+                if bool(result.get("valid")):
+                    self._state = "AWAITING_DYNAMIC"
+                    self._message = "Static stage complete. Continue to dynamic calibration."
+                    self._error = ""
+                else:
+                    self._state = "INVALID"
+                    self._message = str(result.get("message") or "Static stage invalid")
+                    self._error = str(result.get("error") or "")
+                return self._status_locked()
 
         try:
             result = analyze_calibration_run(
@@ -176,11 +236,13 @@ class CalibrationWorkflow:
                 output_directory=run_directory,
             )
         except Exception as exc:
-            self.fail(f"Calibration analysis failed: {exc}")
+            self.fail(f"Calibration analysis failed: {exc}", stage="dynamic")
             return self.status()
 
         with self._lock:
             self._recommendation_path = _optional_path(result.get("recommendation_path"))
+            self._static_suggestion = dict(result.get("static_suggestion") or {})
+            self._dynamic_suggestion = dict(result.get("dynamic_suggestion") or {})
             self._recommended_parameters = dict(result.get("recommended_parameters") or {})
             self._report_path = _optional_path(result.get("report_path"))
             self._overview_path = _optional_path(result.get("overview_path"))
@@ -192,29 +254,76 @@ class CalibrationWorkflow:
 
     def cancel_test(self, message: str = "Calibration test cancelled") -> CalibrationStatus:
         with self._lock:
+            cancelled_test = self._current_test
+            run_directory = self._run_directory
             self._active = False
             self._current_test = ""
             self._started_ns = 0
             self._duration_s = 0.0
-            if self._static_archive is not None:
-                self._state = "STATIC_COMPLETE"
-                self._message = message + ". Static result is still available."
+            if cancelled_test == "static" and run_directory is not None:
+                shutil.rmtree(run_directory, ignore_errors=True)
+                self._reset_run_locked()
+                self._state = "IDLE"
+                self._message = message + ". No calibration run was kept."
+            elif self._static_archive is not None:
+                if run_directory is not None:
+                    (run_directory / DYNAMIC_ARCHIVE_FILENAME).unlink(missing_ok=True)
+                    _write_suggestions_yaml(
+                        run_directory / SUGGESTIONS_FILENAME,
+                        status="awaiting_dynamic",
+                        run_id=run_directory.name,
+                        static_suggestion=self._static_suggestion,
+                        dynamic_suggestion=None,
+                        final_parameters=None,
+                    )
+                self._dynamic_archive = None
+                self._dynamic_suggestion = {}
+                self._state = "AWAITING_DYNAMIC"
+                self._message = message + ". Static stage is still available."
             else:
                 self._state = "IDLE"
                 self._message = message
             return self._status_locked()
 
-    def fail(self, error: str) -> CalibrationStatus:
+    def fail(self, error: str, *, stage: str | None = None) -> CalibrationStatus:
         with self._lock:
+            failed_test = stage or self._current_test
             self._active = False
             self._current_test = ""
             self._started_ns = 0
             self._duration_s = 0.0
-            self._state = "FAILED"
+            if self._static_archive is not None and failed_test != "static":
+                if self._run_directory is not None:
+                    (self._run_directory / DYNAMIC_ARCHIVE_FILENAME).unlink(missing_ok=True)
+                    _write_suggestions_yaml(
+                        self._run_directory / SUGGESTIONS_FILENAME,
+                        status="awaiting_dynamic",
+                        run_id=self._run_directory.name,
+                        static_suggestion=self._static_suggestion,
+                        dynamic_suggestion=None,
+                        final_parameters=None,
+                        error=str(error),
+                    )
+                self._dynamic_archive = None
+                self._dynamic_suggestion = {}
+                self._state = "AWAITING_DYNAMIC"
+                self._message = "Dynamic stage failed. Fix the issue and retry the dynamic stage."
+            else:
+                if self._run_directory is not None:
+                    _write_suggestions_yaml(
+                        self._run_directory / SUGGESTIONS_FILENAME,
+                        status="failed_static",
+                        run_id=self._run_directory.name,
+                        static_suggestion=None,
+                        dynamic_suggestion=None,
+                        final_parameters=None,
+                        error=str(error),
+                    )
+                self._state = "FAILED"
+                self._message = "Calibration failed. Review the error and repeat the static stage."
             self._valid = False
-            self._recommended_parameters = {}
+            self._recommended_parameters = dict(self._static_suggestion)
             self._error = str(error)
-            self._message = "Calibration failed. Review the error and repeat the affected test."
             return self._status_locked()
 
     def status(self) -> CalibrationStatus:
@@ -222,19 +331,11 @@ class CalibrationWorkflow:
             return self._status_locked()
 
     def open_output_location(self) -> str:
+        """Return the active calibration folder without invoking a desktop shell."""
         with self._lock:
             target = self._run_directory or self.output_root
         target = target.expanduser().resolve()
         target.mkdir(parents=True, exist_ok=True)
-        if sys.platform.startswith("win"):
-            startfile = getattr(os, "startfile", None)
-            if startfile is None:
-                raise RuntimeError("Windows folder opening is unavailable in this Python runtime")
-            startfile(str(target))
-        elif sys.platform == "darwin":
-            subprocess.Popen(["open", str(target)])
-        else:
-            subprocess.Popen(["xdg-open", str(target)])
         return str(target)
 
     def run_directory(self) -> Path | None:
@@ -254,10 +355,35 @@ class CalibrationWorkflow:
         self._static_archive = None
         self._dynamic_archive = None
         self._recommendation_path = None
+        self._static_suggestion = {}
+        self._dynamic_suggestion = {}
         self._recommended_parameters = {}
         self._report_path = None
         self._overview_path = None
         self._base_parameters = base_parameters
+        self._valid = False
+        self._error = ""
+        _write_suggestions_yaml(
+            run_directory / SUGGESTIONS_FILENAME,
+            status="awaiting_static",
+            run_id=run_directory.name,
+            static_suggestion=None,
+            dynamic_suggestion=None,
+            final_parameters=None,
+        )
+        self._recommendation_path = run_directory / SUGGESTIONS_FILENAME
+
+    def _reset_run_locked(self) -> None:
+        self._run_directory = None
+        self._static_archive = None
+        self._dynamic_archive = None
+        self._recommendation_path = None
+        self._static_suggestion = {}
+        self._dynamic_suggestion = {}
+        self._recommended_parameters = {}
+        self._report_path = None
+        self._overview_path = None
+        self._base_parameters = None
         self._valid = False
         self._error = ""
 
@@ -267,7 +393,13 @@ class CalibrationWorkflow:
         if self._active and self._started_ns:
             elapsed_s = max(0.0, (time.perf_counter_ns() - self._started_ns) / 1_000_000_000.0)
             progress = min(1.0, elapsed_s / self._duration_s) if self._duration_s > 0 else 0.0
-        elif self._state in {"STATIC_COMPLETE", "ANALYZING", "COMPLETE", "INVALID"}:
+        elif self._state in {
+            "ANALYZING_STATIC",
+            "AWAITING_DYNAMIC",
+            "ANALYZING",
+            "COMPLETE",
+            "INVALID",
+        }:
             progress = 1.0
         run_directory = str(self._run_directory.resolve()) if self._run_directory else ""
         return CalibrationStatus(
@@ -277,11 +409,14 @@ class CalibrationWorkflow:
             elapsed_s=elapsed_s,
             duration_s=self._duration_s,
             progress=progress,
+            run_id=self._run_directory.name if self._run_directory else "",
             run_directory=run_directory,
             export_path=run_directory,
             static_archive_path=str(self._static_archive or ""),
             dynamic_archive_path=str(self._dynamic_archive or ""),
             recommendation_path=str(self._recommendation_path or ""),
+            static_suggestion=dict(self._static_suggestion),
+            dynamic_suggestion=dict(self._dynamic_suggestion),
             recommended_parameters=dict(self._recommended_parameters),
             report_path=str(self._report_path or ""),
             overview_path=str(self._overview_path or ""),
@@ -289,6 +424,89 @@ class CalibrationWorkflow:
             message=self._message,
             error=self._error,
         )
+
+
+def analyze_static_calibration_stage(
+    static_archive_path: str | Path,
+    *,
+    base_parameters: KneeAngleFilterParameters,
+    output_directory: str | Path,
+) -> dict[str, Any]:
+    """Validate the static stage and atomically update the shared suggestions YAML."""
+    output_dir = Path(output_directory).expanduser().resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    static_archive = Path(static_archive_path).expanduser().resolve()
+    static_data = load_archive_data(static_archive)
+    gates = _static_quality_gates(static_data, base_parameters)
+    failed_gates = [name for name, gate in gates.items() if not gate["passed"]]
+    report_path = output_dir / "calibration_report.json"
+    recommendation_path = output_dir / SUGGESTIONS_FILENAME
+    run_id = output_dir.name
+
+    if failed_gates:
+        report = {
+            "schema_version": "vision_imu_calibration_report_v2",
+            "generated_at": datetime.now().astimezone().isoformat(),
+            "status": "INVALID_STATIC",
+            "method": "static_offset_bias_analysis",
+            "quality_gates": gates,
+            "failed_gates": failed_gates,
+            "source_archives": {"static": static_archive.name, "dynamic": None},
+            "baseline_parameters": _parameter_payload(base_parameters),
+            "message": "Static data did not pass the quality gates. Repeat the static stage.",
+        }
+        _atomic_write_json(report_path, report)
+        _write_suggestions_yaml(
+            recommendation_path,
+            status="invalid_static",
+            run_id=run_id,
+            static_suggestion=None,
+            dynamic_suggestion=None,
+            final_parameters=None,
+            failed_gates=failed_gates,
+        )
+        return {
+            "valid": False,
+            "message": "Static stage invalid — repeat the static stage.",
+            "error": ", ".join(failed_gates),
+            "report_path": str(report_path),
+            "recommendation_path": str(recommendation_path),
+            "static_suggestion": {},
+        }
+
+    static_result = _derive_static_parameters(static_data, base_parameters)
+    static_parameters = static_result["parameters"]
+    static_suggestion = _parameter_payload(static_parameters)
+    report = {
+        "schema_version": "vision_imu_calibration_report_v2",
+        "generated_at": datetime.now().astimezone().isoformat(),
+        "status": "AWAITING_DYNAMIC",
+        "method": "static_offset_bias_analysis",
+        "quality_gates": gates,
+        "source_archives": {"static": static_archive.name, "dynamic": None},
+        "baseline_parameters": _parameter_payload(base_parameters),
+        "static_suggestion": static_suggestion,
+        "static_derivation": {
+            key: value for key, value in static_result.items() if key != "parameters"
+        },
+    }
+    _atomic_write_json(report_path, report)
+    _write_suggestions_yaml(
+        recommendation_path,
+        status="awaiting_dynamic",
+        run_id=run_id,
+        static_suggestion=static_suggestion,
+        dynamic_suggestion=None,
+        final_parameters=None,
+    )
+    return {
+        "valid": True,
+        "message": "Static stage complete. Continue to dynamic calibration.",
+        "error": "",
+        "report_path": str(report_path),
+        "recommendation_path": str(recommendation_path),
+        "static_suggestion": static_suggestion,
+    }
 
 
 def analyze_calibration_run(
@@ -305,29 +523,47 @@ def analyze_calibration_run(
     static_data = load_archive_data(static_archive)
     dynamic_data = load_archive_data(dynamic_archive)
 
+    static_gates = _static_quality_gates(static_data, base_parameters)
+    static_failed = [name for name, gate in static_gates.items() if not gate["passed"]]
+    static_result: dict[str, Any] | None = None
+    static_suggestion: dict[str, Any] = {}
+    if not static_failed:
+        static_result = _derive_static_parameters(static_data, base_parameters)
+        static_suggestion = _parameter_payload(static_result["parameters"])
+
     gates = _quality_gates(static_data, dynamic_data, base_parameters)
     failed_gates = [name for name, gate in gates.items() if not gate["passed"]]
     report_path = output_dir / "calibration_report.json"
     overview_path = output_dir / "calibration_overview.png"
-    recommendation_path = output_dir / "recommended_imu_settings.yaml"
+    recommendation_path = output_dir / SUGGESTIONS_FILENAME
+    run_id = output_dir.name
 
     if failed_gates:
-        recommendation_path.unlink(missing_ok=True)
         report = {
-            "schema_version": "vision_imu_calibration_report_v1",
+            "schema_version": "vision_imu_calibration_report_v2",
             "generated_at": datetime.now().astimezone().isoformat(),
             "status": "INVALID",
             "method": "synchronized_static_dynamic_vision_imu_comparison",
             "quality_gates": gates,
             "failed_gates": failed_gates,
             "source_archives": {
-                "static": str(static_archive),
-                "dynamic": str(dynamic_archive),
+                "static": static_archive.name,
+                "dynamic": dynamic_archive.name,
             },
             "baseline_parameters": _parameter_payload(base_parameters),
+            "static_suggestion": static_suggestion or None,
             "message": "Test data did not pass the quality gates. No settings were recommended.",
         }
-        report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+        _atomic_write_json(report_path, report)
+        _write_suggestions_yaml(
+            recommendation_path,
+            status="invalid",
+            run_id=run_id,
+            static_suggestion=static_suggestion or None,
+            dynamic_suggestion=None,
+            final_parameters=None,
+            failed_gates=failed_gates,
+        )
         _write_invalid_overview(overview_path, report)
         return {
             "valid": False,
@@ -335,11 +571,14 @@ def analyze_calibration_run(
             "error": ", ".join(failed_gates),
             "report_path": str(report_path),
             "overview_path": str(overview_path),
-            "recommendation_path": "",
+            "recommendation_path": str(recommendation_path),
+            "static_suggestion": static_suggestion,
+            "dynamic_suggestion": {},
             "recommended_parameters": {},
         }
 
-    static_result = _derive_static_parameters(static_data, base_parameters)
+    if static_result is None:
+        raise RuntimeError("Static calibration result is unexpectedly unavailable")
     static_parameters = static_result["parameters"]
     baseline_dynamic = evaluate_parameters(dynamic_data, base_parameters)
 
@@ -361,7 +600,7 @@ def analyze_calibration_run(
         ) / baseline_dynamic.score
 
     report = {
-        "schema_version": "vision_imu_calibration_report_v1",
+        "schema_version": "vision_imu_calibration_report_v2",
         "generated_at": datetime.now().astimezone().isoformat(),
         "status": "VALID",
         "method": "synchronized_static_dynamic_vision_imu_comparison",
@@ -374,10 +613,12 @@ def analyze_calibration_run(
         },
         "quality_gates": gates,
         "source_archives": {
-            "static": str(static_archive),
-            "dynamic": str(dynamic_archive),
+            "static": static_archive.name,
+            "dynamic": dynamic_archive.name,
         },
         "baseline_parameters": _parameter_payload(base_parameters),
+        "static_suggestion": static_suggestion,
+        "dynamic_suggestion": _parameter_payload(recommended_parameters),
         "recommended_parameters": _parameter_payload(recommended_parameters),
         "static_derivation": {
             key: value for key, value in static_result.items() if key != "parameters"
@@ -395,11 +636,16 @@ def analyze_calibration_run(
             "Orientation conventions are preserved; this tool does not rewrite axis mapping automatically.",
         ],
     }
-    report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
-    _write_recommendation_yaml(
+    _atomic_write_json(report_path, report)
+    dynamic_suggestion = _parameter_payload(recommended_parameters)
+    _write_suggestions_yaml(
         recommendation_path,
-        recommended_parameters,
-        report=report,
+        status="complete",
+        run_id=run_id,
+        static_suggestion=static_suggestion,
+        dynamic_suggestion=dynamic_suggestion,
+        final_parameters=dynamic_suggestion,
+        dynamic_score_improvement_percent=improvement_percent,
     )
     _write_calibration_overview(
         overview_path,
@@ -419,6 +665,8 @@ def analyze_calibration_run(
         "report_path": str(report_path),
         "overview_path": str(overview_path),
         "recommendation_path": str(recommendation_path),
+        "static_suggestion": static_suggestion,
+        "dynamic_suggestion": dynamic_suggestion,
         "recommended_parameters": _parameter_payload(recommended_parameters),
     }
 
@@ -554,6 +802,71 @@ def _candidate_parameters(
                 candidate.validate()
                 candidates.append(candidate)
     return candidates
+
+
+def _static_quality_gates(
+    static_data: ArchiveData,
+    parameters: KneeAngleFilterParameters,
+) -> dict[str, dict[str, Any]]:
+    static_sync = _valid_sync_rows(static_data.sync_rows)
+    static_valid_fraction = _visual_valid_fraction(static_data.sync_rows)
+    static_sync_p95 = _sync_p95_ms(static_sync)
+    static_gap_fraction = _sequence_gap_fraction(static_data.raw_rows)
+    static_ready_fraction = _imu_ready_fraction(static_data.raw_rows)
+    static_base_pairs = len(
+        _paired_values(
+            static_data.sync_rows,
+            replay_filter(static_data.raw_rows, parameters),
+            lag_ms=0.0,
+        )
+    )
+    static_motion = _static_motion_p95(static_data.raw_rows, parameters)
+
+    def gate(passed: bool, value: Any, requirement: str) -> dict[str, Any]:
+        return {"passed": bool(passed), "value": value, "requirement": requirement}
+
+    return {
+        "static_imu_samples": gate(
+            len(static_data.raw_rows) >= 300,
+            len(static_data.raw_rows),
+            ">= 300 raw IMU samples",
+        ),
+        "static_imu_ready_fraction": gate(
+            static_ready_fraction >= 0.95,
+            static_ready_fraction,
+            ">= 95% samples with both IMUs ready",
+        ),
+        "static_valid_visual_rows": gate(
+            len(static_sync) >= 30,
+            len(static_sync),
+            ">= 30 synchronized valid visual rows",
+        ),
+        "static_valid_comparison_pairs": gate(
+            static_base_pairs >= 30,
+            static_base_pairs,
+            ">= 30 valid baseline camera/IMU pairs",
+        ),
+        "static_tracking_fraction": gate(
+            static_valid_fraction >= MIN_VISUAL_VALID_FRACTION,
+            static_valid_fraction,
+            f">= {MIN_VISUAL_VALID_FRACTION:.0%}",
+        ),
+        "static_sync_p95_ms": gate(
+            static_sync_p95 <= MAX_SYNC_ERROR_MS,
+            static_sync_p95,
+            f"<= {MAX_SYNC_ERROR_MS:.0f} ms",
+        ),
+        "static_motion_p95_deg_s": gate(
+            static_motion <= 5.0,
+            static_motion,
+            "<= 5 deg/s; leg must remain still",
+        ),
+        "static_sequence_gap_fraction": gate(
+            static_gap_fraction <= 0.01,
+            static_gap_fraction,
+            "<= 1% missing sequence steps",
+        ),
+    }
 
 
 def _quality_gates(
@@ -822,28 +1135,82 @@ def _sample_from_row(row: Mapping[str, str]) -> ImuCalibrationSample:
     )
 
 
-def _write_recommendation_yaml(
+def _write_suggestions_yaml(
     path: Path,
-    parameters: KneeAngleFilterParameters,
     *,
-    report: Mapping[str, Any],
+    status: str,
+    run_id: str,
+    static_suggestion: Mapping[str, Any] | None,
+    dynamic_suggestion: Mapping[str, Any] | None,
+    final_parameters: Mapping[str, Any] | None,
+    dynamic_score_improvement_percent: float | None = None,
+    failed_gates: Sequence[str] | None = None,
+    error: str | None = None,
 ) -> None:
     try:
         import yaml
     except ImportError as exc:
-        raise RuntimeError("PyYAML is required to export recommended settings") from exc
+        raise RuntimeError("PyYAML is required to export calibration suggestions") from exc
+    static_stage_status = (
+        "valid"
+        if static_suggestion
+        else "invalid"
+        if status in {"invalid_static", "failed_static"}
+        else "pending"
+    )
+    dynamic_stage_status = (
+        "valid"
+        if dynamic_suggestion
+        else "invalid"
+        if status == "invalid"
+        else "pending"
+    )
     payload = {
-        "schema_version": "vision_imu_recommended_settings_v1",
+        "schema_version": "vision_imu_filter_suggestions_v2",
+        "calibration_id": run_id,
         "generated_at": datetime.now().astimezone().isoformat(),
-        "status": "VALID",
+        "status": str(status),
         "method": "static_offset_bias_plus_dynamic_grid_search",
         "reference": "synchronized MoveNet knee-angle comparison",
-        "dynamic_score_improvement_percent": report["metrics"][
-            "dynamic_score_improvement_percent"
-        ],
-        "stm32_control": {"knee_angle": _parameter_payload(parameters)},
+        "source_trials": {
+            "static": STATIC_ARCHIVE_FILENAME,
+            "dynamic": DYNAMIC_ARCHIVE_FILENAME,
+        },
+        "static_stage": {
+            "status": static_stage_status,
+            "suggestion": dict(static_suggestion) if static_suggestion else None,
+        },
+        "dynamic_stage": {
+            "status": dynamic_stage_status,
+            "suggestion": dict(dynamic_suggestion) if dynamic_suggestion else None,
+        },
+        "final_recommended_settings": (
+            dict(final_parameters) if final_parameters is not None else None
+        ),
     }
-    path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+    if dynamic_score_improvement_percent is not None:
+        payload["dynamic_score_improvement_percent"] = float(
+            dynamic_score_improvement_percent
+        )
+    if failed_gates:
+        payload["failed_quality_gates"] = list(failed_gates)
+    if error:
+        payload["last_error"] = str(error)
+    if final_parameters is not None:
+        # Keep the final YAML directly loadable by the existing filter loader.
+        payload["stm32_control"] = {"knee_angle": dict(final_parameters)}
+    _atomic_write_text(path, yaml.safe_dump(payload, sort_keys=False))
+
+
+def _atomic_write_json(path: Path, payload: Mapping[str, Any]) -> None:
+    _atomic_write_text(path, json.dumps(payload, indent=2))
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + ".tmp")
+    temporary.write_text(text, encoding="utf-8")
+    os.replace(temporary, path)
 
 
 def _write_calibration_overview(

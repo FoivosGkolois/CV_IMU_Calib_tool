@@ -402,8 +402,8 @@ def test_runtime_starts_guided_static_calibration_only_when_ready(tmp_path: Path
     runtime = VisionRuntime(
         PreviewCamera(),
         FakeEstimator(),
-        recording_root=tmp_path / "recordings",
-        calibration_root=tmp_path / "calibration_results",
+        recording_root=tmp_path / "video_recordings",
+        calibration_root=tmp_path / "calibration_suggestions",
         imu_source=ReadyCalibrationImuSource(),  # type: ignore[arg-type]
     )  # type: ignore[arg-type]
     runtime._status = RuntimeStatus(  # noqa: SLF001 - focused runtime state test
@@ -447,3 +447,23 @@ def test_runtime_camera_status_reports_auto_selected_device(tmp_path: Path) -> N
     assert camera["selector"] == "auto"
     assert camera["active_index"] == 3
     assert camera["source"] == "camera:3 [V4L2, MJPG]"
+
+
+def test_runtime_reports_portable_clickable_export_paths(tmp_path: Path) -> None:
+    recording_root = tmp_path / "video_recordings"
+    calibration_root = tmp_path / "calibration_suggestions"
+    runtime = VisionRuntime(
+        PreviewCamera(),
+        FakeEstimator(),
+        recording_root=recording_root,
+        calibration_root=calibration_root,
+    )  # type: ignore[arg-type]
+
+    status = runtime.status()
+
+    assert status["recording"]["display_path"] == "video_recordings"
+    assert status["recording"]["browse_url"] == "/exports/recordings/"
+    assert status["calibration"]["display_path"] == "calibration_suggestions"
+    assert status["calibration"]["browse_url"] == "/exports/calibration/"
+    assert str(tmp_path) not in status["recording"]["display_path"]
+    assert str(tmp_path) not in status["calibration"]["display_path"]

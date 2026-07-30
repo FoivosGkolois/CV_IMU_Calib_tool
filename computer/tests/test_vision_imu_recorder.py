@@ -5,6 +5,7 @@ from pathlib import Path
 from zipfile import ZipFile
 
 import numpy as np
+import pytest
 
 from computer.vision_imu_calibration.recorder import AnnotatedVideoRecorder
 
@@ -274,33 +275,31 @@ def test_recorder_separates_raw_and_processed_imu_outputs(tmp_path: Path, monkey
         assert "acquisition_overview.png" in archive.namelist()
 
 
-def test_open_output_location_uses_windows_explorer(tmp_path: Path, monkeypatch) -> None:
-    opened: list[str] = []
-    monkeypatch.setattr("computer.vision_imu_calibration.recorder.sys.platform", "win32")
-    monkeypatch.setattr(
-        "computer.vision_imu_calibration.recorder.os.startfile",
-        lambda path: opened.append(path),
-        raising=False,
-    )
-    recorder = AnnotatedVideoRecorder(tmp_path / "recordings")
+def test_open_output_location_returns_portable_directory_without_shell_side_effects(
+    tmp_path: Path,
+) -> None:
+    output_root = tmp_path / "video_recordings"
+    recorder = AnnotatedVideoRecorder(output_root)
+
     resolved = recorder.open_output_location()
-    assert opened == [resolved]
+
+    assert Path(resolved) == output_root.resolve()
     assert Path(resolved).is_dir()
 
 
-def test_recorder_supports_calibration_output_root_prefix_and_metadata(
+def test_recorder_supports_exact_owned_calibration_archive_name(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
     fake_cv2 = FakeCv2()
     monkeypatch.setattr("computer.vision_imu_calibration.recorder._load_cv2", lambda: fake_cv2)
-    recorder = AnnotatedVideoRecorder(tmp_path / "recordings")
-    calibration_root = tmp_path / "calibration_results" / "calibration_run_test"
+    recorder = AnnotatedVideoRecorder(tmp_path / "video_recordings")
+    calibration_root = tmp_path / "calibration_suggestions" / "calibration_run_test"
     recorder.request_start(
         settings={},
         source="camera:0",
         output_root=calibration_root,
-        session_name_prefix="static_test",
+        session_name="static_trial",
         extra_metadata={"calibration_test_type": "static"},
     )
     frame = np.zeros((120, 160, 3), dtype=np.uint8)
@@ -317,7 +316,24 @@ def test_recorder_supports_calibration_output_root_prefix_and_metadata(
 
     archive = Path(status.archive_path)
     assert archive.parent == calibration_root.resolve()
-    assert archive.name.startswith("static_test_")
+    assert archive.name == "static_trial.zip"
     assert status.output_root == str(calibration_root.resolve())
     metadata = _zip_json(status.archive_path, "recording_metadata.json")
     assert metadata["calibration_test_type"] == "static"
+
+
+def test_exact_session_name_refuses_to_overwrite_existing_archive(
+    tmp_path: Path,
+) -> None:
+    output_root = tmp_path / "calibration_suggestions" / "calibration_run_test"
+    output_root.mkdir(parents=True)
+    (output_root / "static_trial.zip").write_bytes(b"existing")
+    recorder = AnnotatedVideoRecorder(tmp_path / "video_recordings")
+
+    with pytest.raises(FileExistsError):
+        recorder.request_start(
+            settings={},
+            source="camera:0",
+            output_root=output_root,
+            session_name="static_trial",
+        )

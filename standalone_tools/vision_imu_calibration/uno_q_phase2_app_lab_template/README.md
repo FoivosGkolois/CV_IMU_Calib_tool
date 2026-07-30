@@ -22,3 +22,12 @@ available `/dev/video*` nodes, rejects codec-only devices, and keeps the first n
 that returns a real frame. `VISION_IMU_CAMERA_INDEX` can still force a specific index.
 
 Phase 1 and the original PC workflows remain separate and unchanged.
+
+Outputs are stored inside the packaged project root using deterministic owners:
+
+```text
+video_recordings/
+calibration_suggestions/calibration_run_<timestamp>/
+```
+
+The web GUI provides clickable project-relative export links. One calibration session contains `static_trial.zip`, `dynamic_trial.zip`, and one atomically updated `imu_filter_suggestions.yaml`.

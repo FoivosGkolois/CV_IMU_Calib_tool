@@ -6,6 +6,7 @@ from collections import deque
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Mapping
+from urllib.parse import quote
 
 from .calibration_workflow import CalibrationWorkflow
 from .camera_source import OpenCvCameraSource
@@ -51,6 +52,28 @@ def _empty_imu_status() -> dict[str, Any]:
     }
 
 
+def _optional_owned_path(
+    value: Any,
+    root: Path,
+    *,
+    directory: bool = False,
+    require_exists: bool = True,
+) -> Path | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    candidate = Path(text.split("::", 1)[0]).expanduser().resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError:
+        return None
+    if not require_exists:
+        return candidate
+    if directory:
+        return candidate if candidate.is_dir() else None
+    return candidate if candidate.is_file() else None
+
+
 @dataclass(frozen=True)
 class RuntimeStatus:
     state: str
@@ -82,8 +105,8 @@ class VisionRuntime:
         *,
         leg_side: LegSide = LegSide.RIGHT,
         confidence_threshold: float = 0.30,
-        recording_root: str | Path = "recordings",
-        calibration_root: str | Path = "calibration_results",
+        recording_root: str | Path = "video_recordings",
+        calibration_root: str | Path = "calibration_suggestions",
         imu_source: Any | None = None,
         imu_source_factory: Any = SerialImuSource,
         imu_filter: KneeAngleFilterMirror | None = None,
@@ -95,8 +118,12 @@ class VisionRuntime:
             leg_side=leg_side,
             confidence_threshold=float(confidence_threshold),
         )
-        self.recorder = AnnotatedVideoRecorder(recording_root)
-        self.calibration = CalibrationWorkflow(calibration_root)
+        self.recording_root = Path(recording_root).expanduser().resolve()
+        self.calibration_root = Path(calibration_root).expanduser().resolve()
+        self.recording_root.mkdir(parents=True, exist_ok=True)
+        self.calibration_root.mkdir(parents=True, exist_ok=True)
+        self.recorder = AnnotatedVideoRecorder(self.recording_root)
+        self.calibration = CalibrationWorkflow(self.calibration_root)
         self._calibration_timer_cancel: threading.Event | None = None
         self._calibration_timer_thread: threading.Thread | None = None
         self._calibration_action_lock = threading.RLock()
@@ -447,13 +474,63 @@ class VisionRuntime:
             payload = asdict(self._status)
             payload["tuning"] = self._tuning.to_dict()
             payload["pose_backend"] = getattr(self.estimator, "description", type(self.estimator).__name__)
-        payload["recording"] = asdict(self.recorder.status())
+        recording_payload = asdict(self.recorder.status())
+        recording_payload.update(self._recording_export_payload(recording_payload))
+        payload["recording"] = recording_payload
         source = self.imu_source
         payload["imu"] = source.status() if source is not None else _empty_imu_status()
         payload["imu_estimator"] = self.imu_estimator_status()
         payload["camera"] = self.camera_status()
-        payload["calibration"] = asdict(self.calibration.status())
+        calibration_payload = asdict(self.calibration.status())
+        calibration_payload.update(self._calibration_export_payload(calibration_payload))
+        payload["calibration"] = calibration_payload
         return payload
+
+    def _recording_export_payload(self, status: Mapping[str, Any]) -> dict[str, str]:
+        archive = _optional_owned_path(
+            status.get("archive_path"), self.recording_root, require_exists=False
+        )
+        if archive is None:
+            return {
+                "display_path": self.recording_root.name,
+                "download_url": "",
+                "browse_url": "/exports/recordings/",
+            }
+        relative = archive.relative_to(self.recording_root)
+        return {
+            "display_path": f"{self.recording_root.name}/{relative.as_posix()}",
+            "download_url": f"/exports/recordings/{quote(relative.as_posix())}",
+            "browse_url": "/exports/recordings/",
+        }
+
+    def _calibration_export_payload(self, status: Mapping[str, Any]) -> dict[str, str]:
+        run_directory = _optional_owned_path(
+            status.get("run_directory"), self.calibration_root, directory=True
+        )
+        recommendation = _optional_owned_path(
+            status.get("recommendation_path"), self.calibration_root
+        )
+        if run_directory is None:
+            browse_url = "/exports/calibration/"
+            display_path = self.calibration_root.name
+        else:
+            run_relative = run_directory.relative_to(self.calibration_root)
+            browse_url = f"/exports/calibration/{quote(run_relative.as_posix())}/"
+            display_path = f"{self.calibration_root.name}/{run_relative.as_posix()}"
+        recommendation_display = ""
+        recommendation_url = ""
+        if recommendation is not None:
+            relative = recommendation.relative_to(self.calibration_root)
+            recommendation_display = (
+                f"{self.calibration_root.name}/{relative.as_posix()}"
+            )
+            recommendation_url = f"/exports/calibration/{quote(relative.as_posix())}"
+        return {
+            "display_path": display_path,
+            "browse_url": browse_url,
+            "recommendation_display_path": recommendation_display,
+            "recommendation_url": recommendation_url,
+        }
 
     def tuning(self) -> dict[str, Any]:
         with self._lock:
@@ -504,7 +581,7 @@ class VisionRuntime:
                 except Exception:
                     self.recorder.stop()
                     raise
-        return asdict(self.recorder.status())
+        return self.status()["recording"]
 
     def start_calibration_test(self, test_type: str) -> dict[str, Any]:
         with self._calibration_action_lock:
@@ -540,7 +617,7 @@ class VisionRuntime:
                     source=source_description,
                     imu_source=imu_description,
                     output_root=run_directory,
-                    session_name_prefix=f"{prepared['test_type']}_test",
+                    session_name=Path(str(prepared["archive_name"])).stem,
                     extra_metadata={
                         "recording_purpose": "vision_imu_filter_calibration",
                         "calibration_test_type": prepared["test_type"],
@@ -568,7 +645,7 @@ class VisionRuntime:
             )
             self._calibration_timer_thread = timer_thread
             timer_thread.start()
-            return asdict(self.calibration.status())
+            return self.status()["calibration"]
 
     def stop_calibration_test(self) -> dict[str, Any]:
         with self._calibration_action_lock:
@@ -581,13 +658,12 @@ class VisionRuntime:
             recording_status = self.recorder.stop()
             if recording_status.error:
                 self.calibration.fail(recording_status.error)
-                return asdict(self.calibration.status())
-            return asdict(
-                self.calibration.finish_test(
-                    calibration_status.current_test,
-                    recording_status.archive_path,
-                )
+                return self.status()["calibration"]
+            self.calibration.finish_test(
+                calibration_status.current_test,
+                recording_status.archive_path,
             )
+            return self.status()["calibration"]
 
     def cancel_calibration_test(self) -> dict[str, Any]:
         with self._calibration_action_lock:
@@ -596,10 +672,12 @@ class VisionRuntime:
                 timer_cancel.set()
             if self.recorder.status().active:
                 self.recorder.stop()
-            return asdict(self.calibration.cancel_test())
+            self.calibration.cancel_test()
+            return self.status()["calibration"]
 
     def open_calibration_location(self) -> dict[str, str]:
-        return {"path": self.calibration.open_output_location()}
+        status = self._calibration_export_payload(asdict(self.calibration.status()))
+        return {"path": status["display_path"], "url": status["browse_url"]}
 
     def _calibration_auto_stop(
         self,
@@ -614,15 +692,16 @@ class VisionRuntime:
             if current.active and current.current_test == test_type:
                 self.stop_calibration_test()
         except Exception as exc:
-            self.calibration.fail(str(exc))
+            self.calibration.fail(str(exc), stage=test_type)
 
     def stop_recording(self) -> dict[str, Any]:
         if self.calibration.status().active:
             raise RuntimeError("Use the calibration stop control for an active calibration test")
-        return asdict(self.recorder.stop())
+        self.recorder.stop()
+        return self.status()["recording"]
 
     def open_recordings_location(self) -> dict[str, str]:
-        return {"path": self.recorder.open_output_location()}
+        return {"path": self.recording_root.name, "url": "/exports/recordings/"}
 
     def wait_for_jpeg(self, after_sequence: int, timeout_s: float = 1.0) -> tuple[int, bytes | None]:
         deadline = time.monotonic() + max(0.0, float(timeout_s))

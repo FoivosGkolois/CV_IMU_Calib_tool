@@ -116,7 +116,7 @@ uno_r4_dual_imu_stream/uno_r4_dual_imu_stream.ino
 Each completed session creates exactly one archive:
 
 ```text
-recordings/vision_imu_session_<timestamp>.zip
+video_recordings/vision_imu_session_<timestamp>.zip
 ```
 
 The ZIP contains these files directly at its root:
@@ -246,55 +246,59 @@ Both the visual estimator and the IMU estimator now use the same posterior-knee-
 The visual overlay also draws a live colored arc behind the knee.
 
 
-## Customizable live workspace
+## Responsive live workspace
 
-The camera, four live metric cards, angle plot, and control cards can be resized from their lower-right corner. The browser stores these dimensions locally. Use **Reset all box sizes** in the Custom layout card to return to defaults.
+The camera, metric cards, angle plot, and control cards automatically fit the available browser width. Their size is controlled by the responsive page layout rather than user drag handles, so the same GUI behaves deterministically across PCs and the UNO Q browser client.
 
 The live video overlay includes the compact tracking badge plus the thigh/shank bars, hip-knee-ankle markers, posterior knee-angle arc, and live angle value.
 
-## Guided static and dynamic calibration
+## Guided two-stage calibration
 
-The web GUI now provides two guided tests. Both require the UNO R4 stream to be connected, both IMUs to be ready, and visual tracking to be valid.
+The web GUI treats calibration as one deterministic session with two consecutive stages. Both stages require the IMU stream to be connected, both IMUs to be ready, and visual tracking to be valid.
 
-### Static test
+### Stage 1 — static
 
-Press **Start static test**, read the instructions, and start the five-second countdown. The tool then records automatically for 12 seconds. Keep the complete hip–knee–ankle chain visible and keep the leg completely still at one comfortable angle.
+Press **Start calibration**, read the instructions, and start the five-second countdown. The tool records automatically for 12 seconds. Keep the complete hip–knee–ankle chain visible and keep the leg completely still at one comfortable angle.
 
-The static test estimates:
+The static stage estimates the common knee-angle offset, thigh and shank gyro biases, and a practical gyro deadband. It writes the first section of the shared `imu_filter_suggestions.yaml` and leaves the session in `AWAITING_DYNAMIC`.
 
-- the common knee-angle offset relative to the visual reference,
-- thigh and shank gyro biases,
-- a practical gyro deadband from the stationary noise.
+### Stage 2 — dynamic
 
-### Dynamic test
+Press **Continue to dynamic calibration**. After the five-second countdown, perform about five slow and smooth flexion–extension cycles. The tool records automatically for 25 seconds.
 
-After the static test finishes, press **Start dynamic test**. After the five-second countdown, perform about five slow and smooth flexion–extension cycles. The recording stops automatically after 25 seconds.
-
-The PC replays the recorded raw IMU data through a limited deterministic parameter grid. It compares the replayed IMU angle with the synchronized visual reference and selects the candidate with the best combined angle-error, lag, jitter, and drift score.
+The PC replays the recorded raw IMU data through a limited deterministic parameter grid. It compares the replayed IMU angle with the synchronized visual reference and completes the same YAML with the dynamic suggestion and final merged settings.
 
 The workflow preserves the confirmed axis mapping and sign conventions. It does not rewrite hardware orientation parameters automatically.
 
-### Calibration output
+### Deterministic output ownership
 
-Each run is stored under:
+The normal **Record Video** control owns only:
 
 ```text
-calibration_results/calibration_run_<timestamp>/
+video_recordings/vision_imu_session_<timestamp>.zip
 ```
 
-The folder contains:
+Each calibration session owns one run directory:
 
 ```text
-static_test_<timestamp>.zip
-dynamic_test_<timestamp>.zip
-recommended_imu_settings.yaml
+calibration_suggestions/calibration_run_<timestamp>/
+```
+
+The run contains:
+
+```text
+static_trial.zip
+dynamic_trial.zip
+imu_filter_suggestions.yaml
 calibration_report.json
 calibration_overview.png
 ```
 
-The export path in the GUI is clickable and opens the local calibration folder. If tracking, synchronization, sample continuity, stillness, or movement range do not pass the quality gates, the tool exports an invalid report but does not create a recommendation YAML.
+Both trial archives include their own video, raw IMU, processed IMU, synchronized timeline, metadata, and overview files. Static and dynamic never write to `video_recordings`, and the simple recorder never writes to `calibration_suggestions`.
 
-The generated settings are **data-driven recommendations for the recorded setup**, not certified ground-truth parameters. They must still be reviewed before being copied into the production configuration.
+Paths shown in the GUI are project-relative and clickable through the web server, so no Windows-specific or UNO-Q-specific absolute path is exposed. The YAML is written atomically: after the static stage it contains the static suggestion and `awaiting_dynamic`; after the dynamic stage the same file contains the dynamic suggestion and final merged settings.
+
+If quality gates fail, the shared YAML records the invalid state and the failed gates rather than presenting an unvalidated final configuration.
 
 ## UNO Q Phase 2 transport
 

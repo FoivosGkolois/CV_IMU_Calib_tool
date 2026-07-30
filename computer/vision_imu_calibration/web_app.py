@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from html import escape
+from pathlib import Path
 from typing import Any, Iterable
+from urllib.parse import quote
 
 from .runtime import VisionRuntime
 
@@ -21,19 +24,17 @@ _PAGE = r'''<!doctype html>
 * { box-sizing:border-box; }
 html { min-width:320px; }
 body { margin:0; background:var(--bg); color:var(--text); overflow-x:hidden; }
-main { display:grid; grid-template-columns:minmax(360px,max-content) minmax(340px,1fr) minmax(300px,340px); gap:12px; padding:12px; width:100%; max-width:none; margin:0; align-items:start; }
-.camera-column { min-width:0; display:flex; justify-content:flex-start; align-items:flex-start; }
+main { display:grid; grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) minmax(300px,.8fr); gap:12px; padding:12px; width:100%; margin:0; align-items:start; }
+.camera-column { min-width:0; width:100%; display:flex; justify-content:stretch; align-items:flex-start; }
 .live-column { min-width:0; display:grid; grid-template-rows:auto auto; align-content:start; gap:10px; }
-.resizable-box { resize:both; position:relative; }
-.resizable-box::after { content:""; position:absolute; right:3px; bottom:3px; width:10px; height:10px; border-right:2px solid rgba(145,164,191,.65); border-bottom:2px solid rgba(145,164,191,.65); pointer-events:none; }
-.video-shell { background:#05070b; border:1px solid var(--line); border-radius:14px; overflow:hidden; width:min(100%,960px); min-width:320px; min-height:240px; max-width:100%; max-height:calc(100vh - 24px); aspect-ratio:16 / 9; justify-self:start; align-self:start; display:flex; align-items:center; justify-content:center; transition:width .12s ease,height .12s ease; }
+.video-shell { background:#05070b; border:1px solid var(--line); border-radius:14px; overflow:hidden; width:100%; min-width:0; aspect-ratio:16 / 9; align-self:start; display:flex; align-items:center; justify-content:center; }
 .video-shell img { width:100%; height:100%; object-fit:contain; display:block; }
 .live-summary { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; align-items:start; }
 .summary-card, .card, .chart-card { background:var(--surface); border:1px solid var(--line); border-radius:12px; }
-.summary-card { padding:10px 12px; min-width:150px; min-height:74px; max-width:100%; overflow:auto; }
+.summary-card { padding:10px 12px; min-width:0; max-width:100%; overflow:visible; }
 .summary-card .value { font-size:clamp(16px,1.4vw,21px); }
-.control-panel { min-width:0; display:grid; gap:10px; max-height:calc(100vh - 112px); overflow-y:auto; overflow-x:hidden; padding-right:3px; scrollbar-gutter:stable; position:sticky; top:12px; }
-.card { padding:12px; min-width:180px; min-height:72px; max-width:100%; overflow:auto; }
+.control-panel { min-width:0; display:grid; gap:10px; }
+.card { padding:12px; min-width:0; max-width:100%; overflow:visible; }
 .card.priority { border-color:#365374; box-shadow:0 0 0 1px rgba(57,160,255,.08); }
 .card summary { cursor:pointer; list-style:none; display:flex; align-items:center; justify-content:space-between; gap:8px; }
 .card summary::-webkit-details-marker { display:none; }
@@ -60,20 +61,18 @@ button:disabled { opacity:.45; cursor:not-allowed; }
 .button-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-top:9px; }
 .inline-grid { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:7px; align-items:center; margin-top:8px; }
 .inline-grid button { width:auto; min-width:78px; }
-.path-link { height:auto; min-height:34px; margin-top:8px; padding:7px 9px; text-align:left; white-space:normal; line-height:1.3; font-weight:600; color:#a9d6ff; background:#0b1726; border-style:dashed; overflow-wrap:anywhere; }
-.path-link:hover:not(:disabled) { border-color:var(--blue); background:#10243b; }
+.path-link { display:block; width:100%; height:auto; min-height:34px; margin-top:8px; padding:7px 9px; text-align:left; text-decoration:none; white-space:normal; line-height:1.3; font-weight:600; font-size:12px; color:#a9d6ff; background:#0b1726; border:1px dashed #354764; border-radius:9px; overflow-wrap:anywhere; }
+.path-link:hover { border-color:var(--blue); background:#10243b; }
+.path-link[aria-disabled="true"] { opacity:.45; pointer-events:none; }
 .metric-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; margin-top:8px; }
 .metric { background:var(--surface-2); border:1px solid #2a3952; border-radius:9px; padding:8px; min-width:0; }
 .metric .name { color:var(--muted); font-size:9px; text-transform:uppercase; letter-spacing:.07em; }
 .metric .number { margin-top:4px; font-size:16px; font-weight:700; overflow-wrap:anywhere; }
-.chart-card { padding:12px; height:270px; min-width:280px; min-height:210px; max-width:100%; overflow:hidden; }
-.recommendation-card { padding:11px 12px; min-width:280px; min-height:76px; }
+.chart-card { padding:12px; height:clamp(230px,32vh,360px); min-width:0; max-width:100%; overflow:hidden; }
+.recommendation-card { padding:11px 12px; min-width:0; }
 .recommendation-values { margin-top:6px; color:#d8e3f4; font-size:11px; line-height:1.5; overflow-wrap:anywhere; }
 .chart-shell { height:calc(100% - 48px); min-height:140px; margin-top:8px; }
 .chart-shell canvas { width:100%; height:100%; display:block; background:#0a101a; border-radius:9px; }
-.layout-tools { display:grid; gap:8px; }
-.layout-tools .note { margin-top:0; }
-
 .calibration-card { border-color:#6f5b25; box-shadow:0 0 0 1px rgba(255,194,77,.10); }
 .calibration-actions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-top:9px; }
 .calibration-actions button { min-height:38px; height:auto; padding:7px 9px; }
@@ -88,8 +87,8 @@ button:disabled { opacity:.45; cursor:not-allowed; }
 .modal-buttons { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
 footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size:10px; }
 @media (max-width:1280px) {
-  main { grid-template-columns:minmax(340px,max-content) minmax(340px,1fr); }
-  .control-panel { grid-column:1 / -1; position:static; max-height:none; overflow:visible; grid-template-columns:repeat(2,minmax(0,1fr)); }
+  main { grid-template-columns:minmax(0,1.1fr) minmax(0,1fr); }
+  .control-panel { grid-column:1 / -1; grid-template-columns:repeat(2,minmax(0,1fr)); }
   .control-panel > .wide { grid-column:1 / -1; }
 }
 @media (max-width:860px) {
@@ -111,52 +110,52 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
 <body>
 <main>
 <section class="camera-column">
-  <div id="videoShell" class="video-shell resizable-box" data-resize-id="camera"><img id="videoStream" src="/video.mjpg" alt="Live camera stream"></div>
+  <div id="videoShell" class="video-shell"><img id="videoStream" src="/video.mjpg" alt="Live camera stream"></div>
 </section>
 <section class="live-column">
   <div class="live-summary">
-    <div class="summary-card resizable-box" data-resize-id="tracking-card"><div class="label">Tracking</div><div id="tracking" class="value">Starting…</div><div id="reason" class="small">Initializing camera and pose model</div></div>
-    <div class="summary-card resizable-box" data-resize-id="visual-card"><div class="label">Visual angle</div><div id="angle" class="value">--.-°</div><div id="rawAngle" class="small">Raw: --.-°</div></div>
-    <div class="summary-card resizable-box" data-resize-id="imu-card"><div class="label">IMU angle</div><div id="imuAngle" class="value">--.-°</div><div id="imuEstimatorState" class="small">NO SAMPLE</div></div>
-    <div class="summary-card resizable-box" data-resize-id="pose-card"><div class="label">Pose quality</div><div id="confidence" class="value">0.00</div><div id="fps" class="small">0.0 FPS</div></div>
+    <div class="summary-card"><div class="label">Tracking</div><div id="tracking" class="value">Starting…</div><div id="reason" class="small">Initializing camera and pose model</div></div>
+    <div class="summary-card"><div class="label">Visual angle</div><div id="angle" class="value">--.-°</div><div id="rawAngle" class="small">Raw: --.-°</div></div>
+    <div class="summary-card"><div class="label">IMU angle</div><div id="imuAngle" class="value">--.-°</div><div id="imuEstimatorState" class="small">NO SAMPLE</div></div>
+    <div class="summary-card"><div class="label">Pose quality</div><div id="confidence" class="value">0.00</div><div id="fps" class="small">0.0 FPS</div></div>
   </div>
-  <div class="chart-card resizable-box" data-resize-id="angle-plot">
+  <div class="chart-card">
     <div class="label">Live posterior knee-angle presentation · last 15 s</div>
-    <div class="note">Blue: visual reference · Green: IMU estimate. Live display only; calibration scoring runs offline after both tests.</div>
+    <div class="note">Blue: visual reference · Green: IMU estimate. Live display only; calibration scoring runs offline after both stages.</div>
     <div class="chart-shell"><canvas id="angleChart"></canvas></div>
   </div>
-  <div class="recommendation-card card resizable-box" data-resize-id="imu-recommendations">
+  <div class="recommendation-card card">
     <div class="label">Recommended IMU filter settings</div>
-    <div id="imuRecommendationState" class="note">Run the static and dynamic calibration tests to generate data-driven settings.</div>
+    <div id="imuRecommendationState" class="note">Complete both stages of one calibration run to generate data-driven settings.</div>
     <div id="imuRecommendationValues" class="recommendation-values"></div>
   </div>
 </section>
 <aside class="control-panel">
-  <div class="card priority wide calibration-card resizable-box" data-resize-id="calibration-card">
+  <div class="card priority wide calibration-card">
     <div class="label">Guided IMU filter calibration</div>
     <div id="calibrationState" class="value small">READY</div>
-    <div id="calibrationMessage" class="note">Run the static test first, then the dynamic test.</div>
+    <div id="calibrationMessage" class="note">Start calibration with the static stage, then continue to the dynamic stage.</div>
     <div class="progress-track"><div id="calibrationProgress" class="progress-fill"></div></div>
     <div class="calibration-actions">
-      <button id="startStaticTest" class="primary" onclick="showCalibrationInstructions('static')">Start static test</button>
-      <button id="startDynamicTest" class="primary" onclick="showCalibrationInstructions('dynamic')">Start dynamic test</button>
+      <button id="startStaticTest" class="primary" onclick="showCalibrationInstructions('static')">Start calibration</button>
+      <button id="startDynamicTest" class="primary" onclick="showCalibrationInstructions('dynamic')">Continue to dynamic calibration</button>
       <button id="stopCalibrationTest" class="stop" onclick="stopCalibrationTest()">Stop current test</button>
       <button id="cancelCalibrationTest" class="secondary" onclick="cancelCalibrationTest()">Cancel test</button>
     </div>
-    <button id="calibrationPath" class="path-link" onclick="openCalibrationLocation()" disabled>Calibration files will be exported to calibration_results.</button>
+    <a id="calibrationPath" class="path-link" href="/exports/calibration/" target="_blank" rel="noopener">Calibration files will be exported to calibration_suggestions.</a>
   </div>
 
-  <div class="card priority wide resizable-box" data-resize-id="recording-card">
+  <div class="card priority wide">
     <div class="label">Recording</div>
     <div id="recording" class="value small">IDLE</div>
     <div class="button-grid">
       <button id="startRecording" class="record" onclick="recordStart()">Start recording</button>
       <button id="stopRecording" class="stop" onclick="recordStop()">Stop</button>
     </div>
-    <button id="recordingPath" class="path-link" onclick="openRecordingsLocation()" disabled>Trials are finalized as ZIP files inside the recordings folder.</button>
+    <a id="recordingPath" class="path-link" href="/exports/recordings/" target="_blank" rel="noopener">Video recordings are finalized as ZIP files inside video_recordings.</a>
   </div>
 
-  <div class="card wide resizable-box" data-resize-id="imu-stream-card">
+  <div class="card wide">
     <div class="label">Raw IMU source</div>
     <div id="imuState" class="value small">DISCONNECTED</div>
     <div id="imuSerialControls">
@@ -169,14 +168,14 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
     <div id="imuHealth" class="note">Samples: 0 · Gaps: 0 · Parse errors: 0 · Queue drops: 0</div>
   </div>
 
-  <div class="card resizable-box" data-resize-id="camera-profile-card">
+  <div class="card">
     <div class="label">Camera profile</div>
     <select id="cameraProfile" style="margin-top:8px"><option value="fast">Fast · 640×480</option><option value="quality">Quality · 1280×720</option></select>
     <button id="applyCameraProfile" class="primary" style="margin-top:8px" onclick="setCameraProfile()">Apply profile</button>
     <div id="cameraProfileMessage" class="note"><b>Fast:</b> lower load. <b>Quality:</b> more detail at difficult angles.</div>
   </div>
 
-  <details class="card resizable-box" data-resize-id="estimator-card" open>
+  <details class="card" open>
     <summary><span class="label">IMU estimator details</span></summary>
     <div class="metric-grid">
       <div class="metric"><div class="name">Visual − IMU</div><div id="angleDifference" class="number">--.-°</div></div>
@@ -188,7 +187,7 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
     <div id="imuFilterInfo" class="note">Waiting for synchronized raw IMU samples.</div>
   </details>
 
-  <details class="card wide resizable-box" data-resize-id="tuning-card">
+  <details class="card wide">
     <summary><span class="label">Pose-reference tuning</span></summary>
     <div class="controls">
       <div class="control-row">
@@ -211,13 +210,7 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
     <div id="tuningMessage" class="note">Application-level filtering only; model weights are unchanged.</div>
   </details>
 
-  <div class="card wide layout-tools">
-    <div class="label">Custom layout</div>
-    <div class="note">Drag the lower-right corner of the camera, live cards, plot, or control boxes. Sizes are saved in this browser.</div>
-    <button class="secondary" onclick="resetCustomLayout()">Reset all box sizes</button>
-  </div>
-
-  <details class="card wide resizable-box" data-resize-id="diagnostics-card">
+  <details class="card wide">
     <summary><span class="label">Runtime diagnostics</span></summary>
     <div id="runtime" class="value small">STARTING</div>
     <div id="backend" class="note">Backend: MoveNet Thunder</div>
@@ -238,7 +231,7 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
     </div>
   </div>
 </div>
-<footer>Live acquisition plus guided static/dynamic calibration. Recommendations are comparative, data-driven settings based on the synchronized visual reference.</footer>
+<footer>Live acquisition plus one deterministic calibration run with static and dynamic stages. Recommendations are comparative, data-driven settings based on the synchronized visual reference.</footer>
 <script>
 const ids = {
   confidence_threshold:'confidenceThreshold', landmark_smoothing:'landmarkSmoothing',
@@ -310,75 +303,19 @@ const reloadImuFilter=document.getElementById('reloadImuFilter');
 const angleChart=document.getElementById('angleChart');
 const videoShell=document.getElementById('videoShell');
 const videoStream=document.getElementById('videoStream');
-const LAYOUT_STORAGE_KEY='visionImuCustomBoxSizesV1';
-function readStoredLayout(){
-  try { return JSON.parse(localStorage.getItem(LAYOUT_STORAGE_KEY)||'{}'); }
-  catch(e) { return {}; }
-}
-function writeStoredLayout(layout){
-  try { localStorage.setItem(LAYOUT_STORAGE_KEY,JSON.stringify(layout)); }
-  catch(e) {}
-}
-function restoreCustomLayout(){
-  const layout=readStoredLayout();
-  for(const box of document.querySelectorAll('[data-resize-id]')){
-    const saved=layout[box.dataset.resizeId];
-    if(!saved) continue;
-    if(Number(saved.width)>0) box.style.width=Number(saved.width)+'px';
-    if(Number(saved.height)>0) box.style.height=Number(saved.height)+'px';
-    box.dataset.userSized='true';
-  }
-}
-function registerResizableBoxes(){
-  for(const box of document.querySelectorAll('[data-resize-id]')){
-    box.title='Drag the lower-right corner to resize';
-    box.addEventListener('pointerdown',(event)=>{
-      const start=box.getBoundingClientRect();
-      const nearResizeCorner=event.clientX>=start.right-24&&event.clientY>=start.bottom-24;
-      if(!nearResizeCorner) return;
-      const finish=()=>{
-        const end=box.getBoundingClientRect();
-        if(Math.abs(end.width-start.width)<2&&Math.abs(end.height-start.height)<2) return;
-        const layout=readStoredLayout();
-        layout[box.dataset.resizeId]={width:Math.round(end.width),height:Math.round(end.height)};
-        writeStoredLayout(layout);
-        box.dataset.userSized='true';
-        if(box===videoShell) videoShell.style.aspectRatio='auto';
-        drawAngleChart(window.latestAngleRows||[]);
-      };
-      window.addEventListener('pointerup',finish,{once:true});
-    });
-  }
-}
-function resetCustomLayout(){
-  try { localStorage.removeItem(LAYOUT_STORAGE_KEY); } catch(e) {}
-  for(const box of document.querySelectorAll('[data-resize-id]')){
-    box.style.removeProperty('width');
-    box.style.removeProperty('height');
-    box.dataset.userSized='false';
-  }
-  videoShell.style.removeProperty('aspect-ratio');
-  resizeVideoShell(true);
-  drawAngleChart(window.latestAngleRows||[]);
-}
-function resizeVideoShell(force=false){
-  if(!force&&videoShell.dataset.userSized==='true') return;
+function resizeVideoShell(){
   const naturalWidth=Number(videoStream.naturalWidth||0);
   const naturalHeight=Number(videoStream.naturalHeight||0);
   if(!naturalWidth||!naturalHeight) return;
-  const availableWidth=Math.max(1,videoShell.parentElement.clientWidth);
-  const availableHeight=Math.max(260,Math.min(900,window.innerHeight-24));
-  const aspect=naturalWidth/naturalHeight;
-  const width=Math.min(availableWidth,availableHeight*aspect);
-  const height=width/aspect;
-  videoShell.style.width=Math.max(1,Math.round(width))+'px';
-  videoShell.style.height=Math.max(1,Math.round(height))+'px';
-  videoShell.style.aspectRatio=String(aspect);
+  videoShell.style.aspectRatio=String(naturalWidth/naturalHeight);
+  drawAngleChart(window.latestAngleRows||[]);
 }
-restoreCustomLayout();
-registerResizableBoxes();
-videoStream.addEventListener('load',()=>resizeVideoShell(false));
-window.addEventListener('resize',()=>{ resizeVideoShell(false); drawAngleChart(window.latestAngleRows||[]); },{passive:true});
+videoStream.addEventListener('load',resizeVideoShell);
+window.addEventListener('resize',()=>{ resizeVideoShell(); drawAngleChart(window.latestAngleRows||[]); },{passive:true});
+if('ResizeObserver' in window){
+  const observer=new ResizeObserver(()=>drawAngleChart(window.latestAngleRows||[]));
+  observer.observe(angleChart.parentElement);
+}
 function updateSliderLabels(){
   confidenceThresholdValue.textContent=Number(confidenceThreshold.value).toFixed(2);
   landmarkSmoothingValue.textContent=Number(landmarkSmoothing.value).toFixed(2);
@@ -517,27 +454,18 @@ async function cancelCalibrationTest(){
   const r=await fetch('/api/calibration/cancel',{method:'POST'}); const body=await r.json();
   calibrationMessage.textContent=r.ok?(body.message||'Calibration test cancelled.'):('Cancel failed: '+(body.error||'unknown error'));
 }
-async function openCalibrationLocation(){
-  const r=await fetch('/api/calibration/open',{method:'POST'}); const body=await r.json();
-  if(!r.ok) calibrationPath.textContent='Could not open calibration folder: '+(body.error||'unknown error');
-}
 
 async function recordStart(){
-  recordingPath.textContent='Starting trial…';
+  recordingPath.textContent='Starting video recording in video_recordings…';
   const r=await fetch('/api/recording/start',{method:'POST'});
   const body=await r.json();
-  recordingPath.textContent=r.ok?('ZIP destination: '+(body.archive_path||body.path||'recordings')):('Start failed: '+(body.error||'unknown error'));
+  recordingPath.textContent=r.ok?'Recording started. The export link will update automatically.':('Start failed: '+(body.error||'unknown error'));
 }
 async function recordStop(){
   recordingPath.textContent='Finalizing synchronized data and ZIP…';
   const r=await fetch('/api/recording/stop',{method:'POST'});
   const body=await r.json();
-  recordingPath.textContent=r.ok?('Saved ZIP: '+(body.archive_path||body.path||'recordings')):('Stop failed: '+(body.error||'unknown error'));
-}
-async function openRecordingsLocation(){
-  const r=await fetch('/api/recordings/open',{method:'POST'});
-  const body=await r.json();
-  if(!r.ok) recordingPath.textContent='Could not open recordings folder: '+(body.error||'unknown error');
+  recordingPath.textContent=r.ok?'Recording finalized. The clickable export link will update automatically.':('Stop failed: '+(body.error||'unknown error'));
 }
 async function reloadFilterConfig(){
   reloadImuFilter.disabled=true;
@@ -576,11 +504,21 @@ function updateImuRecommendations(cal){
       `max accel correction ${Number(p.max_accel_correction_deg).toFixed(1)}° · relative sign ${Number(p.relative_angle_sign).toFixed(0)}`;
     return;
   }
+  const staticSuggestion=(cal&&cal.static_suggestion)||{};
+  if(cal&&cal.state==='AWAITING_DYNAMIC'&&Object.keys(staticSuggestion).length){
+    imuRecommendationState.textContent='Static-stage suggestion saved. Continue to the dynamic stage for the final settings.';
+    imuRecommendationState.className='note ok';
+    imuRecommendationValues.textContent=
+      `static deadband ${Number(staticSuggestion.gyro_deadband_deg_s).toFixed(2)}°/s · `+
+      `straight offset ${Number(staticSuggestion.straight_leg_offset_deg).toFixed(2)}° · `+
+      `gyro bias thigh/shank ${Number(staticSuggestion.thigh_gyro_bias_deg_s).toFixed(3)} / ${Number(staticSuggestion.shank_gyro_bias_deg_s).toFixed(3)}°/s`;
+    return;
+  }
   imuRecommendationState.className='note';
   imuRecommendationValues.textContent='';
-  if(cal&&cal.state==='ANALYZING') imuRecommendationState.textContent='Analyzing both tests and calculating recommended settings…';
+  if(cal&&String(cal.state||'').startsWith('ANALYZING')) imuRecommendationState.textContent='Analyzing calibration data and updating the shared suggestions YAML…';
   else if(cal&&(cal.state==='INVALID'||cal.state==='FAILED')) imuRecommendationState.textContent='No valid recommendation was generated. Review the calibration result and repeat the failed test.';
-  else imuRecommendationState.textContent='Run the static and dynamic calibration tests to generate data-driven settings.';
+  else imuRecommendationState.textContent='Complete both stages of one calibration run to generate data-driven settings.';
 }
 async function refresh(){
   try {
@@ -613,7 +551,7 @@ async function refresh(){
     angleDifference.textContent=(s.tracking_valid&&est.valid&&Number.isFinite(visual)&&Number.isFinite(imuValue))?(visual-imuValue).toFixed(1)+'°':'--.-°';
     const params=est.parameters||{};
     imuFilterInfo.textContent='Config: '+(est.config_path||'defaults')+' · axis '+(params.rotation_axis_name||'—')+' · α '+Number(params.alpha_stable||0).toFixed(3)+' / '+Number(params.alpha_dynamic||0).toFixed(3)+' · offset '+Number(params.straight_leg_offset_deg||0).toFixed(1)+'°';
-    const calibrationLocked=Boolean((s.calibration||{}).active)||(s.calibration||{}).state==='ANALYZING';
+    const calibrationLocked=Boolean((s.calibration||{}).active)||String((s.calibration||{}).state||'').startsWith('ANALYZING');
     reloadImuFilter.disabled=Boolean((s.recording||{}).active)||calibrationLocked;
     const bridgeManaged=imu.transport==='uno-q-bridge';
     imuSerialControls.hidden=bridgeManaged;
@@ -629,30 +567,35 @@ async function refresh(){
     const cal=s.calibration||{};
     calibrationState.textContent=String(cal.state||'IDLE').replaceAll('_',' ');
     calibrationState.className='value small '+(cal.valid?'ok':(cal.state==='FAILED'||cal.state==='INVALID'?'bad':''));
-    calibrationMessage.textContent=cal.error?`${cal.message||''} Error: ${cal.error}`:(cal.message||'Run the static test first, then the dynamic test.');
+    calibrationMessage.textContent=cal.error?`${cal.message||''} Error: ${cal.error}`:(cal.message||'Start calibration with the static stage.');
     calibrationProgress.style.width=(100*Number(cal.progress||0)).toFixed(1)+'%';
     updateImuRecommendations(cal);
-    const calibrationBusy=Boolean(cal.active)||cal.state==='ANALYZING';
-    startStaticTest.disabled=calibrationBusy||Boolean((s.recording||{}).active)||!Boolean(imu.connected)||!Boolean(imu.thigh_ready&&imu.shank_ready)||!Boolean(s.tracking_valid);
-    startDynamicTest.disabled=calibrationBusy||Boolean((s.recording||{}).active)||!Boolean(cal.static_archive_path)||!Boolean(imu.connected)||!Boolean(imu.thigh_ready&&imu.shank_ready)||!Boolean(s.tracking_valid);
+    const calibrationBusy=Boolean(cal.active)||String(cal.state||'').startsWith('ANALYZING');
+    const sourceReady=Boolean(imu.connected)&&Boolean(imu.thigh_ready&&imu.shank_ready)&&Boolean(s.tracking_valid);
+    startStaticTest.disabled=calibrationBusy||Boolean((s.recording||{}).active)||!sourceReady||cal.state==='AWAITING_DYNAMIC';
+    startStaticTest.textContent=(cal.state==='COMPLETE'||cal.state==='FAILED')?'Start new calibration':'Start calibration';
+    startDynamicTest.disabled=calibrationBusy||Boolean((s.recording||{}).active)||!sourceReady||!Boolean(cal.static_suggestion&&Object.keys(cal.static_suggestion).length)||!['AWAITING_DYNAMIC','INVALID'].includes(cal.state);
     stopCalibrationTestButton.disabled=!Boolean(cal.active);
     cancelCalibrationTestButton.disabled=!Boolean(cal.active);
-    calibrationPath.disabled=!Boolean(cal.export_path);
-    if(cal.recommendation_path) calibrationPath.textContent='Open recommended settings: '+cal.recommendation_path;
-    else if(cal.export_path) calibrationPath.textContent='Open calibration export folder: '+cal.export_path;
-    else calibrationPath.textContent='Calibration files will be exported to calibration_results.';
+    const calibrationHref=cal.recommendation_url||cal.browse_url||'/exports/calibration/';
+    calibrationPath.href=calibrationHref;
+    calibrationPath.setAttribute('aria-disabled',calibrationHref?'false':'true');
+    if(cal.recommendation_display_path) calibrationPath.textContent='Open calibration suggestions: '+cal.recommendation_display_path;
+    else calibrationPath.textContent='Open calibration exports: '+(cal.display_path||'calibration_suggestions');
     const rec=s.recording||{};
     recording.textContent=rec.active?`RECORDING · ${Number(rec.elapsed_s||0).toFixed(1)} s · ${rec.frame_count||0} camera / ${rec.imu_sample_count||0} IMU samples`:'IDLE';
     recording.className='value small '+(rec.active?'rec':'');
     startRecording.disabled=Boolean(rec.active)||calibrationBusy; stopRecording.disabled=!rec.active||Boolean(cal.active);
-    recordingPath.disabled=!Boolean(rec.output_root);
-    if(rec.path) recordingPath.textContent=(rec.active?'ZIP destination: ':'Saved ZIP: ')+rec.path;
-    else if(rec.output_root) recordingPath.textContent='Open recordings folder: '+rec.output_root;
+    const recordingHref=(!rec.active&&rec.download_url)?rec.download_url:(rec.browse_url||'/exports/recordings/');
+    recordingPath.href=recordingHref;
+    recordingPath.setAttribute('aria-disabled',recordingHref?'false':'true');
+    if(rec.display_path) recordingPath.textContent=(rec.active?'ZIP destination: ':'Open saved ZIP: ')+rec.display_path;
+    else recordingPath.textContent='Open video recordings: video_recordings';
     if(rec.error) recordingPath.textContent='Recorder error: '+rec.error;
     if(!window.tuningLoaded && s.tuning){ loadTuning(s.tuning); window.tuningLoaded=true; }
   } catch(e) { runtime.textContent='UI connection error: '+e; }
 }
-setInterval(refresh,350); setInterval(refreshHistory,700); setInterval(()=>resizeVideoShell(false),1500); refresh(); refreshHistory(); resizeVideoShell(false);
+setInterval(refresh,350); setInterval(refreshHistory,700); refresh(); refreshHistory(); resizeVideoShell();
 </script>
 </body>
 </html>
@@ -661,11 +604,17 @@ setInterval(refresh,350); setInterval(refreshHistory,700); setInterval(()=>resiz
 
 def create_app(runtime: VisionRuntime) -> Any:
     try:
-        from flask import Flask, Response, jsonify, request, stream_with_context
+        from flask import Flask, Response, jsonify, request, send_from_directory, stream_with_context
     except ImportError as exc:
         raise RuntimeError("Flask is not installed. Run 08_SETUP_VISION_IMU_PC.bat") from exc
 
     app = Flask(__name__)
+    recording_root = Path(
+        getattr(runtime, "recording_root", Path.cwd() / "video_recordings")
+    ).expanduser().resolve()
+    calibration_root = Path(
+        getattr(runtime, "calibration_root", Path.cwd() / "calibration_suggestions")
+    ).expanduser().resolve()
 
     @app.get("/")
     def index() -> str:
@@ -674,6 +623,60 @@ def create_app(runtime: VisionRuntime) -> Any:
     @app.get("/api/status")
     def status() -> Any:
         return jsonify(runtime.status())
+
+    @app.get("/exports/recordings/")
+    def recordings_index() -> Any:
+        return _export_directory_page(
+            recording_root,
+            recording_root,
+            route_prefix="/exports/recordings/",
+            title="Video recordings",
+        )
+
+    @app.get("/exports/recordings/<path:relative_path>")
+    def recordings_export(relative_path: str) -> Any:
+        target = _safe_export_target(recording_root, relative_path)
+        if target is None or not target.exists():
+            return "Export not found", 404
+        if target.is_dir():
+            return _export_directory_page(
+                recording_root,
+                target,
+                route_prefix="/exports/recordings/",
+                title="Video recordings",
+            )
+        return send_from_directory(
+            str(recording_root),
+            target.relative_to(recording_root).as_posix(),
+            as_attachment=False,
+        )
+
+    @app.get("/exports/calibration/")
+    def calibration_index() -> Any:
+        return _export_directory_page(
+            calibration_root,
+            calibration_root,
+            route_prefix="/exports/calibration/",
+            title="Calibration suggestions",
+        )
+
+    @app.get("/exports/calibration/<path:relative_path>")
+    def calibration_export(relative_path: str) -> Any:
+        target = _safe_export_target(calibration_root, relative_path)
+        if target is None or not target.exists():
+            return "Export not found", 404
+        if target.is_dir():
+            return _export_directory_page(
+                calibration_root,
+                target,
+                route_prefix="/exports/calibration/",
+                title="Calibration suggestions",
+            )
+        return send_from_directory(
+            str(calibration_root),
+            target.relative_to(calibration_root).as_posix(),
+            as_attachment=False,
+        )
 
     @app.get("/api/tuning")
     def tuning() -> Any:
@@ -810,6 +813,77 @@ def create_app(runtime: VisionRuntime) -> Any:
         return response
 
     return app
+
+
+def _safe_export_target(root: Path, relative_path: str) -> Path | None:
+    candidate = (root / str(relative_path or ".")).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError:
+        return None
+    return candidate
+
+
+def _export_directory_page(
+    root: Path,
+    directory: Path,
+    *,
+    route_prefix: str,
+    title: str,
+) -> str:
+    directory.mkdir(parents=True, exist_ok=True)
+    relative_directory = directory.relative_to(root)
+    rows: list[str] = []
+    if directory != root:
+        parent_relative = relative_directory.parent.as_posix()
+        parent_url = route_prefix if parent_relative == "." else (
+            route_prefix + quote(parent_relative) + "/"
+        )
+        rows.append(f'<li><a href="{escape(parent_url)}">../</a></li>')
+    for child in sorted(directory.iterdir(), key=lambda item: (not item.is_dir(), item.name.lower())):
+        relative = child.relative_to(root).as_posix()
+        href = route_prefix + quote(relative)
+        label = child.name + ("/" if child.is_dir() else "")
+        if child.is_dir():
+            href += "/"
+            size_text = "folder"
+        else:
+            size_text = _format_file_size(child.stat().st_size)
+        rows.append(
+            '<li><a href="{href}">{label}</a><span>{size}</span></li>'.format(
+                href=escape(href),
+                label=escape(label),
+                size=escape(size_text),
+            )
+        )
+    if not rows:
+        rows.append("<li><span>No exports yet.</span></li>")
+    location = root.name
+    if relative_directory.as_posix() != ".":
+        location += "/" + relative_directory.as_posix()
+    return """<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{title}</title><style>
+body{{margin:0;padding:24px;background:#0b0f16;color:#eef4ff;font-family:Segoe UI,sans-serif}}
+main{{max-width:920px;margin:auto}} h1{{font-size:22px}} .path{{color:#91a4bf;margin-bottom:18px;overflow-wrap:anywhere}}
+ul{{list-style:none;padding:0;border:1px solid #26354b;border-radius:12px;overflow:hidden}}
+li{{display:flex;justify-content:space-between;gap:16px;padding:11px 14px;background:#111925;border-bottom:1px solid #26354b}}
+li:last-child{{border-bottom:0}} a{{color:#a9d6ff;text-decoration:none;overflow-wrap:anywhere}} a:hover{{text-decoration:underline}}
+span{{color:#91a4bf;font-size:12px;white-space:nowrap}}
+</style></head><body><main><h1>{title}</h1><div class="path">{location}</div><ul>{rows}</ul></main></body></html>""".format(
+        title=escape(title),
+        location=escape(location),
+        rows="".join(rows),
+    )
+
+
+def _format_file_size(size_bytes: int) -> str:
+    size = float(max(0, int(size_bytes)))
+    for unit in ("B", "KiB", "MiB", "GiB"):
+        if size < 1024.0 or unit == "GiB":
+            return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024.0
+    return f"{size_bytes} B"
 
 
 def _mjpeg_stream(runtime: VisionRuntime) -> Iterable[bytes]:

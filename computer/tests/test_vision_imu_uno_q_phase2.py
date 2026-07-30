@@ -93,3 +93,26 @@ def test_phase2_launcher_defaults_to_camera_auto_detection() -> None:
     assert 'os.environ.get("VISION_IMU_CAMERA_WIDTH", "640")' in launcher
     assert 'os.environ.get("VISION_IMU_CAMERA_HEIGHT", "480")' in launcher
     assert 'os.environ.get("VISION_IMU_CAMERA_FPS", "30")' in launcher
+
+
+def test_cli_uses_project_owned_non_configurable_output_roots() -> None:
+    args = build_parser().parse_args([])
+    assert not hasattr(args, "recording_root")
+    assert not hasattr(args, "calibration_root")
+
+
+def test_phase2_launcher_does_not_override_project_output_roots() -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    launcher_path = (
+        project_root
+        / "standalone_tools"
+        / "vision_imu_calibration"
+        / "uno_q_phase2_app_lab_template"
+        / "python"
+        / "main.py"
+    )
+    launcher = launcher_path.read_text(encoding="utf-8")
+
+    assert "--recording-root" not in launcher
+    assert "--calibration-root" not in launcher
+    assert "VISION_IMU_DATA_ROOT" not in launcher

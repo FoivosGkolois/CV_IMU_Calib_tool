@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 pytest.importorskip("flask")
@@ -8,13 +10,41 @@ from computer.vision_imu_calibration.web_app import create_app
 
 
 class FakeRuntime:
-    def __init__(self) -> None:
+    def __init__(self, root: Path) -> None:
+        self.recording_root = root / "video_recordings"
+        self.calibration_root = root / "calibration_suggestions"
+        self.recording_root.mkdir(parents=True)
+        self.calibration_root.mkdir(parents=True)
         self.connected: tuple[str, int] | None = None
         self.profile = "fast"
         self.calibration_test = ""
 
     def status(self):
-        return {"state": "RUNNING"}
+        return {
+            "state": "RUNNING",
+            "recording": {
+                "active": False,
+                "display_path": "video_recordings",
+                "download_url": "",
+                "browse_url": "/exports/recordings/",
+                "error": "",
+            },
+            "calibration": {
+                "active": False,
+                "state": "IDLE",
+                "current_test": "",
+                "message": "Start calibration with the static stage.",
+                "error": "",
+                "display_path": "calibration_suggestions",
+                "browse_url": "/exports/calibration/",
+                "recommendation_display_path": "",
+                "recommendation_url": "",
+                "recommended_parameters": {},
+                "static_suggestion": {},
+                "dynamic_suggestion": {},
+            },
+            "imu": {"transport": "serial"},
+        }
 
     def tuning(self):
         return {}
@@ -44,7 +74,7 @@ class FakeRuntime:
         return {"active": False}
 
     def open_recordings_location(self):
-        return {"path": "C:/tool/recordings"}
+        return {"path": "video_recordings", "url": "/exports/recordings/"}
 
     def start_calibration_test(self, test_type: str):
         self.calibration_test = test_type
@@ -52,21 +82,24 @@ class FakeRuntime:
 
     def stop_calibration_test(self):
         self.calibration_test = ""
-        return {"active": False, "state": "STATIC_COMPLETE"}
+        return {"active": False, "state": "AWAITING_DYNAMIC"}
 
     def cancel_calibration_test(self):
         self.calibration_test = ""
         return {"active": False, "state": "IDLE"}
 
     def open_calibration_location(self):
-        return {"path": "C:/tool/calibration_results/calibration_run_test"}
+        return {
+            "path": "calibration_suggestions/calibration_run_test",
+            "url": "/exports/calibration/calibration_run_test/",
+        }
 
     def wait_for_jpeg(self, after_sequence: int, timeout_s: float = 1.0):
         return after_sequence, None
 
 
-def test_manual_imu_and_camera_profile_endpoints() -> None:
-    runtime = FakeRuntime()
+def test_manual_imu_camera_and_portable_export_endpoints(tmp_path: Path) -> None:
+    runtime = FakeRuntime(tmp_path)
     app = create_app(runtime)  # type: ignore[arg-type]
     client = app.test_client()
 
@@ -91,10 +124,13 @@ def test_manual_imu_and_camera_profile_endpoints() -> None:
 
     opened = client.post("/api/recordings/open")
     assert opened.status_code == 200
-    assert opened.get_json()["path"].endswith("recordings")
+    assert opened.get_json() == {
+        "path": "video_recordings",
+        "url": "/exports/recordings/",
+    }
 
 
-def test_filter_reload_and_history_endpoints() -> None:
+def test_filter_reload_and_history_endpoints(tmp_path: Path) -> None:
     class ExtendedRuntime(FakeRuntime):
         def reload_imu_filter(self):
             return {"valid": False, "reason": "filter_reloaded"}
@@ -102,7 +138,7 @@ def test_filter_reload_and_history_endpoints() -> None:
         def acquisition_history(self, *, seconds: float, max_points: int):
             return [{"host_monotonic_ns": 1, "visual_valid": True, "imu_valid": True}]
 
-    runtime = ExtendedRuntime()
+    runtime = ExtendedRuntime(tmp_path)
     app = create_app(runtime)  # type: ignore[arg-type]
     client = app.test_client()
     reload_response = client.post("/api/imu-filter/reload")
@@ -113,85 +149,61 @@ def test_filter_reload_and_history_endpoints() -> None:
     assert history.get_json()["rows"][0]["host_monotonic_ns"] == 1
 
 
-def test_page_uses_adaptive_and_user_resizable_video_shell() -> None:
-    runtime = FakeRuntime()
-    app = create_app(runtime)  # type: ignore[arg-type]
-    client = app.test_client()
+def test_page_uses_responsive_non_user_resizable_layout(tmp_path: Path) -> None:
+    runtime = FakeRuntime(tmp_path)
+    html = create_app(runtime).test_client().get("/").get_data(as_text=True)  # type: ignore[arg-type]
 
-    page = client.get("/")
-    assert page.status_code == 200
-    html = page.get_data(as_text=True)
     assert 'id="videoShell"' in html
-    assert 'function resizeVideoShell(force=false)' in html
-    assert "videoStream.naturalWidth" in html
-    assert "setInterval(()=>resizeVideoShell(false),1500)" in html
     assert 'alt="Live camera stream"' in html
-    assert 'data-resize-id="camera"' in html
-    assert "visionImuCustomBoxSizesV1" in html
-    assert "function resetCustomLayout()" in html
+    assert "ResizeObserver" in html
+    assert "aspect-ratio" in html
+    assert "resize:both" not in html.replace(" ", "")
+    assert "data-resize-id" not in html
+    assert "visionImuCustomBoxSizesV1" not in html
+    assert "Reset all box sizes" not in html
+    assert "Custom layout" not in html
 
 
-def test_page_uses_left_camera_live_dashboard_workspace_without_header() -> None:
-    runtime = FakeRuntime()
-    app = create_app(runtime)  # type: ignore[arg-type]
-    client = app.test_client()
+def test_page_uses_fluid_three_column_dashboard_with_breakpoints(tmp_path: Path) -> None:
+    runtime = FakeRuntime(tmp_path)
+    html = create_app(runtime).test_client().get("/").get_data(as_text=True)  # type: ignore[arg-type]
 
-    html = client.get("/").get_data(as_text=True)
     assert "VISION–IMU ACQUISITION & PRESENTATION" not in html
     assert '<section class="camera-column">' in html
     assert '<section class="live-column">' in html
     assert html.index('class="camera-column"') < html.index('class="live-column"')
     assert html.index('class="live-column"') < html.index('class="control-panel"')
-    assert "grid-template-columns:minmax(360px,max-content) minmax(340px,1fr) minmax(300px,340px)" in html
-    assert "justify-self:start" in html
+    assert "grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) minmax(300px,.8fr)" in html
+    assert "@media(max-width:1180px)" in html
+    assert "@media(max-width:760px)" in html
 
 
-def test_page_makes_live_plot_and_all_main_cards_user_resizable() -> None:
-    runtime = FakeRuntime()
-    app = create_app(runtime)  # type: ignore[arg-type]
-    client = app.test_client()
-
-    html = client.get("/").get_data(as_text=True)
-    expected_ids = (
-        "tracking-card", "visual-card", "imu-card", "pose-card", "angle-plot",
-        "calibration-card", "recording-card", "imu-stream-card", "camera-profile-card",
-        "estimator-card", "tuning-card", "diagnostics-card",
-    )
-    for resize_id in expected_ids:
-        assert f'data-resize-id="{resize_id}"' in html
-    assert ".resizable-box { resize:both" in html
-    assert ".chart-card { padding:12px; height:270px" in html
-    assert "Reset all box sizes" in html
-    assert 'data-resize-id="imu-recommendations"' in html
-
-
-def test_page_hides_serial_controls_for_bridge_and_renders_recommendations() -> None:
-    runtime = FakeRuntime()
-    app = create_app(runtime)  # type: ignore[arg-type]
-    html = app.test_client().get("/").get_data(as_text=True)
+def test_page_hides_serial_controls_for_bridge_and_renders_recommendations(tmp_path: Path) -> None:
+    runtime = FakeRuntime(tmp_path)
+    html = create_app(runtime).test_client().get("/").get_data(as_text=True)  # type: ignore[arg-type]
 
     assert 'id="imuSerialControls"' in html
     assert "imuSerialControls.hidden=bridgeManaged" in html
     assert "else if(!window.imuPortsLoaded) refreshImuPorts()" in html
-    assert "refresh(); refreshHistory(); resizeVideoShell(false)" in html
     assert 'id="imuRecommendationState"' in html
     assert 'id="imuRecommendationValues"' in html
+    assert "static_suggestion" in html
+    assert "dynamic_suggestion" in html
     assert "recommended_parameters" in html
 
 
-def test_guided_calibration_endpoints_and_countdown_ui() -> None:
-    runtime = FakeRuntime()
+def test_guided_calibration_is_one_two_stage_session(tmp_path: Path) -> None:
+    runtime = FakeRuntime(tmp_path)
     app = create_app(runtime)  # type: ignore[arg-type]
     client = app.test_client()
 
-    page = client.get("/")
-    html = page.get_data(as_text=True)
-    assert "Start static test" in html
-    assert "Start dynamic test" in html
+    html = client.get("/").get_data(as_text=True)
+    assert "Start calibration" in html
+    assert "Continue to dynamic calibration" in html
     assert "Start 5-second countdown" in html
     assert "Wear both IMUs firmly" in html
-    assert "openCalibrationLocation" in html
     assert 'id="calibrationPath"' in html
+    assert "/exports/calibration/" in html
 
     started = client.post("/api/calibration/start", json={"test_type": "static"})
     assert started.status_code == 200
@@ -203,4 +215,36 @@ def test_guided_calibration_endpoints_and_countdown_ui() -> None:
 
     opened = client.post("/api/calibration/open")
     assert opened.status_code == 200
-    assert "calibration_run_test" in opened.get_json()["path"]
+    assert opened.get_json()["path"] == (
+        "calibration_suggestions/calibration_run_test"
+    )
+    assert opened.get_json()["url"].endswith("calibration_run_test/")
+
+
+def test_export_routes_list_and_serve_owned_files_without_traversal(tmp_path: Path) -> None:
+    runtime = FakeRuntime(tmp_path)
+    recording = runtime.recording_root / "vision_imu_session_test.zip"
+    recording.write_bytes(b"recording")
+    run = runtime.calibration_root / "calibration_run_test"
+    run.mkdir()
+    suggestion = run / "imu_filter_suggestions.yaml"
+    suggestion.write_text("status: complete\n", encoding="utf-8")
+
+    client = create_app(runtime).test_client()  # type: ignore[arg-type]
+
+    recording_index = client.get("/exports/recordings/")
+    assert recording_index.status_code == 200
+    assert "vision_imu_session_test.zip" in recording_index.get_data(as_text=True)
+    assert client.get("/exports/recordings/vision_imu_session_test.zip").data == b"recording"
+
+    calibration_index = client.get("/exports/calibration/calibration_run_test/")
+    assert calibration_index.status_code == 200
+    assert "imu_filter_suggestions.yaml" in calibration_index.get_data(as_text=True)
+    suggestion_response = client.get(
+        "/exports/calibration/calibration_run_test/imu_filter_suggestions.yaml"
+    )
+    assert suggestion_response.status_code == 200
+    assert b"status: complete" in suggestion_response.data
+
+    assert client.get("/exports/recordings/../secret.txt").status_code == 404
+    assert client.get("/exports/calibration/../../secret.txt").status_code == 404
