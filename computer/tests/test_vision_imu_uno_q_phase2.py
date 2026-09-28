@@ -116,3 +116,26 @@ def test_phase2_launcher_does_not_override_project_output_roots() -> None:
     assert "--recording-root" not in launcher
     assert "--calibration-root" not in launcher
     assert "VISION_IMU_DATA_ROOT" not in launcher
+
+
+def test_phase2_launcher_reports_copy_paste_ready_url_and_startup_failure() -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    template_root = (
+        project_root
+        / "standalone_tools"
+        / "vision_imu_calibration"
+        / "uno_q_phase2_app_lab_template"
+    )
+    launcher = (template_root / "python" / "main.py").read_text(encoding="utf-8")
+    readme = (template_root / "README.md").read_text(encoding="utf-8")
+    descriptor = (template_root / "app.yaml").read_text(encoding="utf-8")
+
+    assert "WEB GUI READY" in launcher
+    assert "COPY/PASTE ONE OF THESE LINKS" in launcher
+    assert "WEB GUI DID NOT START" in launcher
+    assert "WEB GUI STARTUP TIMEOUT" in launcher
+    assert "socket.create_connection" in launcher
+    assert '"--host",' in launcher and '"0.0.0.0",' in launcher
+    assert "ports:" in descriptor and "8765" in descriptor
+    assert "WEB GUI READY" in readme
+    assert "ERR_CONNECTION_REFUSED" in readme

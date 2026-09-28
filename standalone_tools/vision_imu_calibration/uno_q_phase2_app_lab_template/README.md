@@ -8,18 +8,27 @@ Do not edit or run this template directly. From the project root, run:
 13_BUILD_UNO_Q_PHASE2_APP.bat
 ```
 
-The builder creates `uno_q_phase2_app_ready.zip` with the current Python package, model, App files, and MCU sketch. Import/open that generated App in Arduino App Lab.
+The builder creates `uno_q_phase2_app_ready.zip` with the current Python package, App files, and MCU sketch. Import/open that generated App in Arduino App Lab.
 
-After the App starts, open in a PC browser:
+## Opening the browser GUI
+
+After pressing **Run**, use the **App launch** terminal at the bottom of Arduino App Lab.
+
+Do **not** guess when the web server is ready. Wait until the terminal prints:
 
 ```text
-http://<UNO-Q-IP>:8765
+[VISION-IMU] WEB GUI READY
+[VISION-IMU] COPY/PASTE ONE OF THESE LINKS:
+  <interface>: http://<UNO-Q-IP>:8765
 ```
 
-The USB camera must be visible to the UNO Q App. The launcher now defaults to
-automatic UVC camera discovery instead of assuming `/dev/video0`. It probes the
-available `/dev/video*` nodes, rejects codec-only devices, and keeps the first node
-that returns a real frame. `VISION_IMU_CAMERA_INDEX` can still force a specific index.
+Copy the URL that matches the UNO Q IPv4 address shown by App Lab and paste it into the PC browser.
+
+If the browser reports `ERR_CONNECTION_REFUSED` **before** the `WEB GUI READY` line appears, the server is not ready yet. If startup fails, the App launch terminal now prints `WEB GUI DID NOT START` or `WEB GUI STARTUP TIMEOUT` together with the relevant Python error instead of leaving the App apparently running without a web service.
+
+The App exposes TCP port `8765` in `app.yaml` and the Vision–IMU server binds to `0.0.0.0:8765`.
+
+The USB camera must be visible to the UNO Q App. The launcher defaults to automatic UVC camera discovery instead of assuming `/dev/video0`. It probes the available `/dev/video*` nodes, rejects codec-only devices, and keeps the first node that returns a real frame. `VISION_IMU_CAMERA_INDEX` can still force a specific index.
 
 Phase 1 and the original PC workflows remain separate and unchanged.
 
