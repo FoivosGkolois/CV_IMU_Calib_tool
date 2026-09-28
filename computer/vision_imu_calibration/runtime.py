@@ -136,9 +136,8 @@ class VisionRuntime:
             "saved_utc": "",
             "persistent_rms_reprojection_error_px": None,
         }
-        # Explicit migration gate. Patch 3 will enable this after replacing the
-        # legacy calibration analysis with the physics-based/held-out workflow.
-        self._calibration_workflow_ready = False
+        # Patch 3: physics-based static calibration + cycle-level held-out validation are active.
+        self._calibration_workflow_ready = True
         self._calibration_timer_cancel: threading.Event | None = None
         self._calibration_timer_thread: threading.Thread | None = None
         self._calibration_action_lock = threading.RLock()
@@ -607,9 +606,7 @@ class VisionRuntime:
         payload["camera_calibration"] = camera_calibration_payload
         calibration_payload = asdict(self.calibration.status())
         calibration_payload.update(self._calibration_export_payload(calibration_payload))
-        # Migration safety gate: Patch 1.2 builds the calibrated reference layer,
-        # but the legacy calibration science is intentionally not re-enabled until
-        # Patch 3 replaces the circular/static and dynamic scoring logic.
+        # Expose whether the scientific calibration workflow is enabled.
         calibration_payload["workflow_ready"] = self._calibration_workflow_ready
         payload["calibration"] = calibration_payload
         return payload
@@ -737,9 +734,10 @@ class VisionRuntime:
                 raise RuntimeError("Connect the IMU source before starting calibration")
             if not imu.get("thigh_ready") or not imu.get("shank_ready"):
                 raise RuntimeError("Both thigh and shank IMUs must be READY")
-            if not status.get("tracking_valid"):
+            normalized_test_type = str(test_type or "").strip().lower()
+            if normalized_test_type == "dynamic" and not status.get("tracking_valid"):
                 raise RuntimeError(
-                    "Tag reference must be VALID before the test starts. "
+                    "Tag reference must be VALID before the dynamic test starts. "
                     "Complete the persistent camera/reference setup first."
                 )
 

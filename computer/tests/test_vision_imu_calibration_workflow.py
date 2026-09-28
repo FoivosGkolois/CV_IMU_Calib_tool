@@ -11,8 +11,14 @@ import pytest
 import yaml
 
 from computer.vision_imu_calibration.calibration_workflow import (
+    ArchiveData,
     CalibrationWorkflow,
+    _derive_static_parameters,
+    _detect_dynamic_cycles,
+    _split_dynamic_cycles,
     analyze_calibration_run,
+    evaluate_parameters,
+    load_archive_data,
 )
 from computer.vision_imu_calibration.imu_filter import (
     KneeAngleFilterParameters,
@@ -60,13 +66,13 @@ def _raw_row(index: int, *, host_ns: int, flexion_deg: float, flexion_rate_dps: 
 
 
 def _archive(path: Path, *, dynamic: bool, tracking_valid: bool = True) -> Path:
-    count = 1000 if dynamic else 400
+    count = 1300 if dynamic else 400
     start_ns = 8_000_000_000
     raw_rows: list[dict[str, object]] = []
     flexions: list[float] = []
     for index in range(count):
         t = index * 0.01
-        flexion = 40.0 + 30.0 * math.sin(2.0 * math.pi * t / 2.5) if dynamic else 30.0
+        flexion = 40.0 + 30.0 * math.sin(2.0 * math.pi * t / 2.5) if dynamic else 0.0
         rate = 30.0 * (2.0 * math.pi / 2.5) * math.cos(2.0 * math.pi * t / 2.5) if dynamic else 0.0
         flexions.append(flexion)
         raw_rows.append(
@@ -109,7 +115,7 @@ def _archive(path: Path, *, dynamic: bool, tracking_valid: bool = True) -> Path:
 
 
 def test_analysis_exports_loadable_recommended_settings(tmp_path: Path) -> None:
-    static_archive = _archive(tmp_path / "static.zip", dynamic=False)
+    static_archive = _archive(tmp_path / "static.zip", dynamic=False, tracking_valid=False)
     dynamic_archive = _archive(tmp_path / "dynamic.zip", dynamic=True)
     output = tmp_path / "calibration_run"
 
@@ -142,13 +148,18 @@ def test_analysis_exports_loadable_recommended_settings(tmp_path: Path) -> None:
     report = json.loads(report_path.read_text(encoding="utf-8"))
     assert report["status"] == "VALID"
     assert report["metrics"]["candidate_count"] > 1
-    assert report["metrics"]["static_recommended"]["lag_ms"] == pytest.approx(0.0)
-    assert report["metrics"]["dynamic_recommended"]["pair_count"] >= 80
+    assert report["static_derivation"]["physical_reference_condition"] == "full_extension_180_deg"
+    assert report["metrics"]["training_recommended"]["pair_count"] >= 40
+    assert report["metrics"]["held_out_recommended"]["pair_count"] >= 10
+    assert report["optimization"]["primary_objective"] == "training_cycle_rmse_deg"
+    assert report["optimization"]["candidate_specific_time_shift"] is False
+    assert report["optimization"]["held_out_used_for_selection"] is False
+    assert report["cycle_split"]["held_out_cycle_ids"]
 
 
 def test_invalid_tracking_does_not_export_recommendation(tmp_path: Path) -> None:
     static_archive = _archive(tmp_path / "static.zip", dynamic=False, tracking_valid=False)
-    dynamic_archive = _archive(tmp_path / "dynamic.zip", dynamic=True)
+    dynamic_archive = _archive(tmp_path / "dynamic.zip", dynamic=True, tracking_valid=False)
     output = tmp_path / "invalid_run"
 
     result = analyze_calibration_run(
@@ -167,7 +178,7 @@ def test_invalid_tracking_does_not_export_recommendation(tmp_path: Path) -> None
     assert suggestions["final_recommended_settings"] is None
     report = json.loads((output / "calibration_report.json").read_text(encoding="utf-8"))
     assert report["status"] == "INVALID"
-    assert "static_tracking_fraction" in report["failed_gates"]
+    assert "dynamic_tracking_fraction" in report["failed_gates"]
 
 
 def test_workflow_requires_static_before_dynamic(tmp_path: Path) -> None:
@@ -269,3 +280,58 @@ def test_static_failure_marks_shared_yaml_without_fake_suggestion(tmp_path: Path
     assert payload["static_stage"]["status"] == "invalid"
     assert payload["static_stage"]["suggestion"] is None
     assert payload["last_error"] == "camera unavailable"
+
+
+def test_static_derivation_uses_physical_full_extension_not_visual_reference(tmp_path: Path) -> None:
+    static_archive = _archive(
+        tmp_path / "static_no_marker.zip", dynamic=False, tracking_valid=False
+    )
+    data = load_archive_data(static_archive)
+    result = _derive_static_parameters(data, KneeAngleFilterParameters())
+
+    assert result["physical_reference_condition"] == "full_extension_180_deg"
+    assert result["straight_leg_offset_deg"] == pytest.approx(0.0, abs=0.15)
+    assert result["marker_reference_sanity"]["available"] is False
+    assert result["marker_reference_sanity"]["used_for_static_derivation"] is False
+
+
+def test_dynamic_cycles_are_split_deterministically_with_every_fourth_held_out(
+    tmp_path: Path,
+) -> None:
+    archive = _archive(tmp_path / "dynamic_cycles.zip", dynamic=True)
+    data = load_archive_data(archive)
+    cycles = _detect_dynamic_cycles(data.sync_rows)
+    training, held_out = _split_dynamic_cycles(cycles)
+
+    assert len(cycles) >= 4
+    assert [cycle["cycle_id"] for cycle in held_out] == [
+        cycle["cycle_id"] for cycle in cycles if cycle["cycle_id"] % 4 == 0
+    ]
+    assert set(cycle["cycle_id"] for cycle in training).isdisjoint(
+        cycle["cycle_id"] for cycle in held_out
+    )
+
+
+def test_primary_candidate_score_is_unshifted_rmse(tmp_path: Path) -> None:
+    archive = _archive(tmp_path / "dynamic_rmse.zip", dynamic=True)
+    data = load_archive_data(archive)
+    metrics = evaluate_parameters(data, KneeAngleFilterParameters())
+
+    assert metrics.score == pytest.approx(metrics.rmse_deg)
+
+
+def test_static_straight_offset_comes_from_accelerometer_geometry_without_marker() -> None:
+    base = KneeAngleFilterParameters()
+    start_ns = 1_000_000_000
+    raw_rows = [
+        _raw_row(
+            index,
+            host_ns=start_ns + index * 10_000_000,
+            flexion_deg=15.0,
+            flexion_rate_dps=0.0,
+        )
+        for index in range(400)
+    ]
+    result = _derive_static_parameters(ArchiveData(raw_rows=raw_rows, sync_rows=[]), base)
+    assert result["straight_leg_offset_deg"] == pytest.approx(15.0, abs=0.15)
+    assert result["marker_reference_sanity"]["available"] is False

@@ -371,9 +371,9 @@ const CALIBRATION_GUIDANCE={
     title:'Static calibration test',
     intro:'The tool records for 12 seconds and then stops automatically.',
     steps:[
-      'Wear both IMUs firmly and keep Tag 0 on the thigh and Tag 1 on the shank visible to the side camera.',
-      'Keep both AprilTags visible and wait for Reference VALID.',
-      'Choose one comfortable knee angle and remain completely still for the full test.'
+      'Wear both IMUs firmly in the same mounting that will be used for the dynamic test.',
+      'Stand with the calibrated leg fully extended: the physical reference condition is 180°.',
+      'Remain completely still for the full 12 seconds. AprilTags are optional in this static stage and are used only as a sanity check.'
     ]
   },
   dynamic:{
@@ -382,7 +382,7 @@ const CALIBRATION_GUIDANCE={
     steps:[
       'Keep exactly the same IMU, tag, and camera mounting used for the static test.',
       'Keep both AprilTags visible and wait for Reference VALID.',
-      'Perform about five slow, smooth flexion–extension cycles without sudden movements.'
+      'Perform repeated complete flexion–extension cycles, mixing slow, normal and somewhat faster movements. Aim for at least 6 cycles.'
     ]
   }
 };
@@ -577,10 +577,11 @@ async function refresh(){
     calibrationProgress.style.width=(100*Number(cal.progress||0)).toFixed(1)+'%';
     updateImuRecommendations(cal);
     const calibrationBusy=Boolean(cal.active)||String(cal.state||'').startsWith('ANALYZING');
-    const sourceReady=Boolean(cal.workflow_ready)&&Boolean(imu.connected)&&Boolean(imu.thigh_ready&&imu.shank_ready)&&Boolean(s.tracking_valid);
-    startStaticTest.disabled=calibrationBusy||Boolean((s.recording||{}).active)||!sourceReady||cal.state==='AWAITING_DYNAMIC';
+    const imuReady=Boolean(cal.workflow_ready)&&Boolean(imu.connected)&&Boolean(imu.thigh_ready&&imu.shank_ready);
+    const dynamicReady=imuReady&&Boolean(s.tracking_valid);
+    startStaticTest.disabled=calibrationBusy||Boolean((s.recording||{}).active)||!imuReady||cal.state==='AWAITING_DYNAMIC';
     startStaticTest.textContent=(cal.state==='COMPLETE'||cal.state==='FAILED')?'Start new calibration':'Start calibration';
-    startDynamicTest.disabled=calibrationBusy||Boolean((s.recording||{}).active)||!sourceReady||!Boolean(cal.static_suggestion&&Object.keys(cal.static_suggestion).length)||!['AWAITING_DYNAMIC','INVALID'].includes(cal.state);
+    startDynamicTest.disabled=calibrationBusy||Boolean((s.recording||{}).active)||!dynamicReady||!Boolean(cal.static_suggestion&&Object.keys(cal.static_suggestion).length)||!['AWAITING_DYNAMIC','INVALID'].includes(cal.state);
     stopCalibrationTestButton.disabled=!Boolean(cal.active);
     cancelCalibrationTestButton.disabled=!Boolean(cal.active);
     const calibrationHref=cal.recommendation_url||cal.browse_url||'/exports/calibration/';

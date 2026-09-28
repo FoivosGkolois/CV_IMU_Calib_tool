@@ -26,3 +26,21 @@ V2 marker-reference Patch 1.2
 - Persistent checkerboard camera calibration belongs to Patch 2.1.
 - Scientific IMU calibration remains migration-locked until Patch 3 replaces
   the legacy static/dynamic calibration analysis.
+
+Patch 2 — persistent marker reference setup
+- Patch 2.1 added checkerboard camera calibration and objective reprojection checks.
+- Patch 2.2 added persistent reference_setup.yaml, setup log, startup validation,
+  and viewport-fitting browser layout.
+
+Patch 3.1 — physics-based static calibration
+- Straight-leg offset now comes from the known 180 deg full-extension condition
+  and stationary accelerometer geometry, not visual-vs-filter disagreement.
+- Gyro bias/noise/deadband are derived from stationary raw IMU data.
+- Marker data is optional in the static stage and is reported only as a sanity check.
+
+Patch 3.2 — cycle-level dynamic validation
+- Detects complete marker-reference flexion-extension cycles.
+- Every fourth accepted cycle is held out; held-out cycles never select parameters.
+- Primary candidate objective is unshifted synchronized RMSE.
+- Candidate-specific lag shifting and the legacy hand-weighted score are removed.
+- The deterministic grid remains only as a temporary search backend until Patch 4.

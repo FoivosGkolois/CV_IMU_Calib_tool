@@ -22,6 +22,8 @@ STATIC_TEST_DURATION_S = 12.0
 DYNAMIC_TEST_DURATION_S = 25.0
 MAX_SYNC_ERROR_MS = 20.0
 MIN_VISUAL_VALID_FRACTION = 0.70
+MIN_ACCEPTED_DYNAMIC_CYCLES = 4
+HELD_OUT_CYCLE_STRIDE = 4
 SUGGESTIONS_FILENAME = "imu_filter_suggestions.yaml"
 STATIC_ARCHIVE_FILENAME = "static_trial.zip"
 DYNAMIC_ARCHIVE_FILENAME = "dynamic_trial.zip"
@@ -448,7 +450,7 @@ def analyze_static_calibration_stage(
             "schema_version": "vision_imu_calibration_report_v2",
             "generated_at": datetime.now().astimezone().isoformat(),
             "status": "INVALID_STATIC",
-            "method": "static_offset_bias_analysis",
+            "method": "physics_based_static_calibration",
             "quality_gates": gates,
             "failed_gates": failed_gates,
             "source_archives": {"static": static_archive.name, "dynamic": None},
@@ -481,7 +483,7 @@ def analyze_static_calibration_stage(
         "schema_version": "vision_imu_calibration_report_v2",
         "generated_at": datetime.now().astimezone().isoformat(),
         "status": "AWAITING_DYNAMIC",
-        "method": "static_offset_bias_analysis",
+        "method": "physics_based_static_calibration",
         "quality_gates": gates,
         "source_archives": {"static": static_archive.name, "dynamic": None},
         "baseline_parameters": _parameter_payload(base_parameters),
@@ -516,6 +518,12 @@ def analyze_calibration_run(
     base_parameters: KneeAngleFilterParameters,
     output_directory: str | Path,
 ) -> dict[str, Any]:
+    """Complete Patch-3 calibration using physics-based static calibration and held-out cycles.
+
+    Static quantities are derived only from the stationary IMU data and the known
+    full-extension condition. Dynamic filter-design parameters are selected on
+    training cycles only. Held-out cycles are never used to select a candidate.
+    """
     output_dir = Path(output_directory).expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     static_archive = Path(static_archive_path).expanduser().resolve()
@@ -531,21 +539,44 @@ def analyze_calibration_run(
         static_result = _derive_static_parameters(static_data, base_parameters)
         static_suggestion = _parameter_payload(static_result["parameters"])
 
-    gates = _quality_gates(static_data, dynamic_data, base_parameters)
+    cycles = _detect_dynamic_cycles(dynamic_data.sync_rows)
+    train_cycles, validation_cycles = _split_dynamic_cycles(cycles)
+    train_rows = _rows_for_cycles(dynamic_data.sync_rows, train_cycles)
+    validation_rows = _rows_for_cycles(dynamic_data.sync_rows, validation_cycles)
+
+    gates = _quality_gates(
+        static_data,
+        dynamic_data,
+        base_parameters,
+        cycles=cycles,
+        train_rows=train_rows,
+        validation_rows=validation_rows,
+    )
     failed_gates = [name for name, gate in gates.items() if not gate["passed"]]
     report_path = output_dir / "calibration_report.json"
     overview_path = output_dir / "calibration_overview.png"
     recommendation_path = output_dir / SUGGESTIONS_FILENAME
     run_id = output_dir.name
 
+    split_payload = {
+        "rule": "every_4th_accepted_cycle_held_out",
+        "accepted_cycle_count": len(cycles),
+        "training_cycle_ids": [cycle["cycle_id"] for cycle in train_cycles],
+        "held_out_cycle_ids": [cycle["cycle_id"] for cycle in validation_cycles],
+        "training_reference_rows": len(train_rows),
+        "held_out_reference_rows": len(validation_rows),
+        "cycles": cycles,
+    }
+
     if failed_gates:
         report = {
             "schema_version": "vision_imu_calibration_report_v2",
             "generated_at": datetime.now().astimezone().isoformat(),
             "status": "INVALID",
-            "method": "synchronized_static_dynamic_vision_imu_comparison",
+            "method": "physics_static_plus_cycle_split_dynamic_calibration",
             "quality_gates": gates,
             "failed_gates": failed_gates,
+            "cycle_split": split_payload,
             "source_archives": {
                 "static": static_archive.name,
                 "dynamic": dynamic_archive.name,
@@ -563,6 +594,7 @@ def analyze_calibration_run(
             dynamic_suggestion=None,
             final_parameters=None,
             failed_gates=failed_gates,
+            cycle_split=split_payload,
         )
         _write_invalid_overview(overview_path, report)
         return {
@@ -580,38 +612,51 @@ def analyze_calibration_run(
     if static_result is None:
         raise RuntimeError("Static calibration result is unexpectedly unavailable")
     static_parameters = static_result["parameters"]
-    baseline_dynamic = evaluate_parameters(dynamic_data, base_parameters)
 
+    baseline_train = evaluate_parameters(dynamic_data, static_parameters, sync_rows=train_rows)
+    baseline_validation = evaluate_parameters(
+        dynamic_data, static_parameters, sync_rows=validation_rows
+    )
+
+    # Patch 3 intentionally keeps the existing deterministic grid as a temporary
+    # search backend. Patch 4 replaces only this selector with GP Bayesian
+    # Optimization; the train/held-out separation established here remains.
     candidates = _candidate_parameters(static_parameters)
     evaluated: list[tuple[KneeAngleFilterParameters, EvaluationMetrics]] = []
     for candidate in candidates:
-        metrics = evaluate_parameters(dynamic_data, candidate)
+        metrics = evaluate_parameters(dynamic_data, candidate, sync_rows=train_rows)
         if metrics.pair_count:
             evaluated.append((candidate, metrics))
     if not evaluated:
         raise RuntimeError("No valid dynamic parameter candidate could be evaluated")
-    recommended_parameters, recommended_dynamic = min(evaluated, key=lambda item: item[1].score)
-    recommended_static = evaluate_parameters(static_data, recommended_parameters)
 
-    improvement_percent = 0.0
-    if baseline_dynamic.score > 1e-9:
-        improvement_percent = 100.0 * (
-            baseline_dynamic.score - recommended_dynamic.score
-        ) / baseline_dynamic.score
+    recommended_parameters, recommended_train = min(
+        evaluated, key=lambda item: item[1].rmse_deg
+    )
+    recommended_validation = evaluate_parameters(
+        dynamic_data, recommended_parameters, sync_rows=validation_rows
+    )
+
+    held_out_improvement_percent = 0.0
+    if baseline_validation.rmse_deg > 1e-9 and math.isfinite(baseline_validation.rmse_deg):
+        held_out_improvement_percent = 100.0 * (
+            baseline_validation.rmse_deg - recommended_validation.rmse_deg
+        ) / baseline_validation.rmse_deg
 
     report = {
         "schema_version": "vision_imu_calibration_report_v2",
         "generated_at": datetime.now().astimezone().isoformat(),
         "status": "VALID",
-        "method": "synchronized_static_dynamic_vision_imu_comparison",
+        "method": "physics_static_plus_cycle_split_dynamic_calibration",
         "reference": {
-            "type": "vision_assisted_comparative_reference",
+            "type": "marker_based_geometric_reference",
             "statement": (
-                "Recommendations minimize disagreement with the synchronized visual reference "
-                "inside these two tests; they are not absolute ground truth."
+                "Dynamic performance is evaluated against the synchronized calibrated "
+                "marker reference. Held-out cycles are excluded from parameter selection."
             ),
         },
         "quality_gates": gates,
+        "cycle_split": split_payload,
         "source_archives": {
             "static": static_archive.name,
             "dynamic": dynamic_archive.name,
@@ -623,17 +668,26 @@ def analyze_calibration_run(
         "static_derivation": {
             key: value for key, value in static_result.items() if key != "parameters"
         },
+        "optimization": {
+            "temporary_search_backend": "deterministic_grid_search",
+            "primary_objective": "training_cycle_rmse_deg",
+            "candidate_specific_time_shift": False,
+            "held_out_used_for_selection": False,
+            "candidate_count": len(evaluated),
+        },
         "metrics": {
-            "static_recommended": recommended_static.to_dict(),
-            "dynamic_baseline": baseline_dynamic.to_dict(),
-            "dynamic_recommended": recommended_dynamic.to_dict(),
-            "dynamic_score_improvement_percent": improvement_percent,
+            "training_baseline": baseline_train.to_dict(),
+            "training_recommended": recommended_train.to_dict(),
+            "held_out_baseline": baseline_validation.to_dict(),
+            "held_out_recommended": recommended_validation.to_dict(),
+            "held_out_rmse_improvement_percent": held_out_improvement_percent,
             "candidate_count": len(evaluated),
         },
         "limitations": [
-            "The visual estimator is a comparative reference, not a certified angle standard.",
+            "The marker system is an engineering reference, not absolute ground truth; setup-level uncertainty should be quantified separately.",
             "The recommendation is valid only for the tested sensor mounting and movement range.",
-            "Orientation conventions are preserved; this tool does not rewrite axis mapping automatically.",
+            "The current search backend remains a deterministic grid until Patch 4 replaces it with GP Bayesian Optimization.",
+            "Estimated lag is reported diagnostically and is never optimized away per candidate.",
         ],
     }
     _atomic_write_json(report_path, report)
@@ -645,21 +699,22 @@ def analyze_calibration_run(
         static_suggestion=static_suggestion,
         dynamic_suggestion=dynamic_suggestion,
         final_parameters=dynamic_suggestion,
-        dynamic_score_improvement_percent=improvement_percent,
+        held_out_rmse_improvement_percent=held_out_improvement_percent,
+        cycle_split=split_payload,
     )
     _write_calibration_overview(
         overview_path,
         dynamic_data,
-        base_parameters,
+        static_parameters,
         recommended_parameters,
-        baseline_dynamic,
-        recommended_dynamic,
+        baseline_validation,
+        recommended_validation,
     )
     return {
         "valid": True,
         "message": (
             "Calibration complete. Recommended settings and report were exported. "
-            f"Dynamic score change: {improvement_percent:+.1f}%."
+            f"Held-out RMSE change: {held_out_improvement_percent:+.1f}%."
         ),
         "error": "",
         "report_path": str(report_path),
@@ -669,7 +724,6 @@ def analyze_calibration_run(
         "dynamic_suggestion": dynamic_suggestion,
         "recommended_parameters": _parameter_payload(recommended_parameters),
     }
-
 
 def load_archive_data(archive_path: str | Path) -> ArchiveData:
     path = Path(archive_path)
@@ -691,15 +745,20 @@ def load_archive_data(archive_path: str | Path) -> ArchiveData:
 def evaluate_parameters(
     data: ArchiveData,
     parameters: KneeAngleFilterParameters,
+    *,
+    sync_rows: Sequence[Mapping[str, str]] | None = None,
 ) -> EvaluationMetrics:
+    """Replay one parameter set and evaluate it without candidate-specific time shifting.
+
+    RMSE is the primary objective. Lag, jitter and drift are descriptive metrics only.
+    The same synchronized timestamps are used for every candidate, which prevents a
+    candidate from improving its score by shifting itself in time.
+    """
     estimates = replay_filter(data.raw_rows, parameters)
-    pairs = _paired_values(data.sync_rows, estimates, lag_ms=0.0)
+    rows = data.sync_rows if sync_rows is None else sync_rows
+    pairs = _paired_values(rows, estimates, lag_ms=0.0)
     if not pairs:
         return _empty_metrics()
-    lag_ms = _estimate_lag_ms(data.sync_rows, estimates)
-    lagged_pairs = _paired_values(data.sync_rows, estimates, lag_ms=lag_ms)
-    if lagged_pairs:
-        pairs = lagged_pairs
     errors = [visual - imu for _, visual, imu in pairs]
     abs_errors = [abs(value) for value in errors]
     mae = statistics.fmean(abs_errors)
@@ -711,7 +770,7 @@ def evaluate_parameters(
     ) if len(errors) > 1 else 0.0
     segment = max(1, len(errors) // 5)
     drift = statistics.median(errors[-segment:]) - statistics.median(errors[:segment])
-    score = mae + 0.20 * p95 + 0.015 * abs(lag_ms) + 0.15 * jitter + 0.10 * abs(drift)
+    lag_ms = _estimate_lag_ms(rows, estimates)
     return EvaluationMetrics(
         pair_count=len(pairs),
         mae_deg=mae,
@@ -721,9 +780,8 @@ def evaluate_parameters(
         lag_ms=lag_ms,
         jitter_deg_per_frame=jitter,
         drift_deg=drift,
-        score=score,
+        score=rmse,
     )
-
 
 def replay_filter(
     raw_rows: Sequence[Mapping[str, str]],
@@ -742,24 +800,42 @@ def _derive_static_parameters(
     data: ArchiveData,
     base_parameters: KneeAngleFilterParameters,
 ) -> dict[str, Any]:
-    baseline_estimates = replay_filter(data.raw_rows, base_parameters)
-    pairs = _paired_values(data.sync_rows, baseline_estimates, lag_ms=0.0)
-    if not pairs:
-        raise RuntimeError("Static test has no synchronized valid camera/IMU pairs")
-    angle_offset_delta = statistics.median(visual - imu for _, visual, imu in pairs)
+    """Derive static quantities from physics, not from the filter being tuned.
 
-    thigh_rates = [_signed_axis_rate(row, "thigh", base_parameters) for row in data.raw_rows]
-    shank_rates = [_signed_axis_rate(row, "shank", base_parameters) for row in data.raw_rows]
+    The user supplies the physical condition: the leg is fully extended, therefore
+    knee flexion is zero (posterior knee angle 180 deg). Gravity gives the segment
+    orientations, while stationary gyro samples give bias and short-term noise.
+    """
+    if not data.raw_rows:
+        raise RuntimeError("Static test contains no raw IMU samples")
+
+    straight_offsets: list[float] = []
+    thigh_rates: list[float] = []
+    shank_rates: list[float] = []
+    for row in data.raw_rows:
+        thigh_acc = _acceleration_angle_from_row(row, "thigh", base_parameters)
+        shank_acc = _acceleration_angle_from_row(row, "shank", base_parameters)
+        thigh_segment = thigh_acc - base_parameters.thigh_offset_deg
+        shank_segment = shank_acc - base_parameters.shank_offset_deg
+        relative = _shortest_angle_error_deg(shank_segment, thigh_segment)
+        straight_offsets.append(base_parameters.relative_angle_sign * relative)
+        thigh_rates.append(_signed_axis_rate(row, "thigh", base_parameters))
+        shank_rates.append(_signed_axis_rate(row, "shank", base_parameters))
+
+    straight_leg_offset = statistics.median(straight_offsets)
     thigh_bias = statistics.median(thigh_rates)
     shank_bias = statistics.median(shank_rates)
-    residual_rates = [
-        *(abs(rate - thigh_bias) for rate in thigh_rates),
-        *(abs(rate - shank_bias) for rate in shank_rates),
-    ]
-    deadband = min(2.5, max(0.15, 1.5 * _percentile(residual_rates, 95.0)))
+    thigh_residuals = [rate - thigh_bias for rate in thigh_rates]
+    shank_residuals = [rate - shank_bias for rate in shank_rates]
+    thigh_noise_sigma = _robust_sigma(thigh_residuals)
+    shank_noise_sigma = _robust_sigma(shank_residuals)
+    residual_abs = [abs(value) for value in thigh_residuals + shank_residuals]
+    noise_p95 = _percentile(residual_abs, 95.0)
+    deadband = min(2.5, max(0.05, 3.0 * max(thigh_noise_sigma, shank_noise_sigma)))
+
     parameters = replace(
         base_parameters,
-        straight_leg_offset_deg=base_parameters.straight_leg_offset_deg + angle_offset_delta,
+        straight_leg_offset_deg=straight_leg_offset,
         thigh_gyro_bias_deg_s=thigh_bias,
         shank_gyro_bias_deg_s=shank_bias,
         gyro_deadband_deg_s=deadband,
@@ -767,13 +843,19 @@ def _derive_static_parameters(
     parameters.validate()
     return {
         "parameters": parameters,
-        "angle_offset_delta_deg": angle_offset_delta,
+        "physical_reference_condition": "full_extension_180_deg",
+        "straight_leg_offset_deg": straight_leg_offset,
+        "straight_leg_offset_std_deg": statistics.pstdev(straight_offsets) if len(straight_offsets) > 1 else 0.0,
         "thigh_gyro_bias_deg_s": thigh_bias,
         "shank_gyro_bias_deg_s": shank_bias,
+        "thigh_gyro_noise_sigma_deg_s": thigh_noise_sigma,
+        "shank_gyro_noise_sigma_deg_s": shank_noise_sigma,
+        "combined_gyro_noise_p95_deg_s": noise_p95,
+        "gyro_deadband_rule": "3x robust stationary gyro sigma, clamped to [0.05, 2.5] deg/s",
         "gyro_deadband_deg_s": deadband,
-        "pair_count": len(pairs),
+        "sample_count": len(data.raw_rows),
+        "marker_reference_sanity": _static_marker_reference_sanity(data.sync_rows),
     }
-
 
 def _candidate_parameters(
     static_parameters: KneeAngleFilterParameters,
@@ -808,19 +890,10 @@ def _static_quality_gates(
     static_data: ArchiveData,
     parameters: KneeAngleFilterParameters,
 ) -> dict[str, dict[str, Any]]:
-    static_sync = _valid_sync_rows(static_data.sync_rows)
-    static_valid_fraction = _visual_valid_fraction(static_data.sync_rows)
-    static_sync_p95 = _sync_p95_ms(static_sync)
     static_gap_fraction = _sequence_gap_fraction(static_data.raw_rows)
     static_ready_fraction = _imu_ready_fraction(static_data.raw_rows)
-    static_base_pairs = len(
-        _paired_values(
-            static_data.sync_rows,
-            replay_filter(static_data.raw_rows, parameters),
-            lag_ms=0.0,
-        )
-    )
     static_motion = _static_motion_p95(static_data.raw_rows, parameters)
+    gravity_fraction = _static_gravity_valid_fraction(static_data.raw_rows, parameters)
 
     def gate(passed: bool, value: Any, requirement: str) -> dict[str, Any]:
         return {"passed": bool(passed), "value": value, "requirement": requirement}
@@ -836,30 +909,15 @@ def _static_quality_gates(
             static_ready_fraction,
             ">= 95% samples with both IMUs ready",
         ),
-        "static_valid_visual_rows": gate(
-            len(static_sync) >= 30,
-            len(static_sync),
-            ">= 30 synchronized valid visual rows",
-        ),
-        "static_valid_comparison_pairs": gate(
-            static_base_pairs >= 30,
-            static_base_pairs,
-            ">= 30 valid baseline camera/IMU pairs",
-        ),
-        "static_tracking_fraction": gate(
-            static_valid_fraction >= MIN_VISUAL_VALID_FRACTION,
-            static_valid_fraction,
-            f">= {MIN_VISUAL_VALID_FRACTION:.0%}",
-        ),
-        "static_sync_p95_ms": gate(
-            static_sync_p95 <= MAX_SYNC_ERROR_MS,
-            static_sync_p95,
-            f"<= {MAX_SYNC_ERROR_MS:.0f} ms",
+        "static_gravity_valid_fraction": gate(
+            gravity_fraction >= 0.95,
+            gravity_fraction,
+            ">= 95% samples with both accelerometer norms inside the configured no-trust bound around 1 g",
         ),
         "static_motion_p95_deg_s": gate(
             static_motion <= 5.0,
             static_motion,
-            "<= 5 deg/s; leg must remain still",
+            "<= 5 deg/s; leg must remain still and fully extended",
         ),
         "static_sequence_gap_fraction": gate(
             static_gap_fraction <= 0.01,
@@ -868,76 +926,37 @@ def _static_quality_gates(
         ),
     }
 
-
 def _quality_gates(
     static_data: ArchiveData,
     dynamic_data: ArchiveData,
     parameters: KneeAngleFilterParameters,
+    *,
+    cycles: Sequence[Mapping[str, Any]] | None = None,
+    train_rows: Sequence[Mapping[str, str]] | None = None,
+    validation_rows: Sequence[Mapping[str, str]] | None = None,
 ) -> dict[str, dict[str, Any]]:
-    static_sync = _valid_sync_rows(static_data.sync_rows)
+    static_gates = _static_quality_gates(static_data, parameters)
     dynamic_sync = _valid_sync_rows(dynamic_data.sync_rows)
-    static_valid_fraction = _visual_valid_fraction(static_data.sync_rows)
     dynamic_valid_fraction = _visual_valid_fraction(dynamic_data.sync_rows)
-    static_sync_p95 = _sync_p95_ms(static_sync)
     dynamic_sync_p95 = _sync_p95_ms(dynamic_sync)
-    static_gap_fraction = _sequence_gap_fraction(static_data.raw_rows)
     dynamic_gap_fraction = _sequence_gap_fraction(dynamic_data.raw_rows)
-    static_ready_fraction = _imu_ready_fraction(static_data.raw_rows)
     dynamic_ready_fraction = _imu_ready_fraction(dynamic_data.raw_rows)
-    static_base_pairs = len(
-        _paired_values(static_data.sync_rows, replay_filter(static_data.raw_rows, parameters), lag_ms=0.0)
-    )
     dynamic_base_pairs = len(
         _paired_values(dynamic_data.sync_rows, replay_filter(dynamic_data.raw_rows, parameters), lag_ms=0.0)
     )
     dynamic_angles = [float(row["visual_knee_angle_deg"]) for row in dynamic_sync]
     dynamic_range = max(dynamic_angles) - min(dynamic_angles) if dynamic_angles else 0.0
-    static_motion = _static_motion_p95(static_data.raw_rows, parameters)
+    detected_cycles = list(cycles) if cycles is not None else _detect_dynamic_cycles(dynamic_data.sync_rows)
+    if train_rows is None or validation_rows is None:
+        train_cycles, held_out_cycles = _split_dynamic_cycles(detected_cycles)
+        train_rows = _rows_for_cycles(dynamic_data.sync_rows, train_cycles)
+        validation_rows = _rows_for_cycles(dynamic_data.sync_rows, held_out_cycles)
 
     def gate(passed: bool, value: Any, requirement: str) -> dict[str, Any]:
         return {"passed": bool(passed), "value": value, "requirement": requirement}
 
     return {
-        "static_imu_samples": gate(
-            len(static_data.raw_rows) >= 300,
-            len(static_data.raw_rows),
-            ">= 300 raw IMU samples",
-        ),
-        "static_imu_ready_fraction": gate(
-            static_ready_fraction >= 0.95,
-            static_ready_fraction,
-            ">= 95% samples with both IMUs ready",
-        ),
-        "static_valid_visual_rows": gate(
-            len(static_sync) >= 30,
-            len(static_sync),
-            ">= 30 synchronized valid visual rows",
-        ),
-        "static_valid_comparison_pairs": gate(
-            static_base_pairs >= 30,
-            static_base_pairs,
-            ">= 30 valid baseline camera/IMU pairs",
-        ),
-        "static_tracking_fraction": gate(
-            static_valid_fraction >= MIN_VISUAL_VALID_FRACTION,
-            static_valid_fraction,
-            f">= {MIN_VISUAL_VALID_FRACTION:.0%}",
-        ),
-        "static_sync_p95_ms": gate(
-            static_sync_p95 <= MAX_SYNC_ERROR_MS,
-            static_sync_p95,
-            f"<= {MAX_SYNC_ERROR_MS:.0f} ms",
-        ),
-        "static_motion_p95_deg_s": gate(
-            static_motion <= 5.0,
-            static_motion,
-            "<= 5 deg/s; leg must remain still",
-        ),
-        "static_sequence_gap_fraction": gate(
-            static_gap_fraction <= 0.01,
-            static_gap_fraction,
-            "<= 1% missing sequence steps",
-        ),
+        **static_gates,
         "dynamic_imu_samples": gate(
             len(dynamic_data.raw_rows) >= 800,
             len(dynamic_data.raw_rows),
@@ -951,12 +970,12 @@ def _quality_gates(
         "dynamic_valid_visual_rows": gate(
             len(dynamic_sync) >= 80,
             len(dynamic_sync),
-            ">= 80 synchronized valid visual rows",
+            ">= 80 synchronized valid marker-reference rows",
         ),
         "dynamic_valid_comparison_pairs": gate(
             dynamic_base_pairs >= 80,
             dynamic_base_pairs,
-            ">= 80 valid baseline camera/IMU pairs",
+            ">= 80 valid baseline marker/IMU pairs",
         ),
         "dynamic_tracking_fraction": gate(
             dynamic_valid_fraction >= MIN_VISUAL_VALID_FRACTION,
@@ -978,6 +997,188 @@ def _quality_gates(
             dynamic_gap_fraction,
             "<= 1% missing sequence steps",
         ),
+        "dynamic_accepted_cycles": gate(
+            len(detected_cycles) >= MIN_ACCEPTED_DYNAMIC_CYCLES,
+            len(detected_cycles),
+            f">= {MIN_ACCEPTED_DYNAMIC_CYCLES} complete flexion-extension cycles",
+        ),
+        "dynamic_training_reference_rows": gate(
+            len(train_rows) >= 40,
+            len(train_rows),
+            ">= 40 valid marker-reference rows in training cycles",
+        ),
+        "dynamic_held_out_reference_rows": gate(
+            len(validation_rows) >= 10,
+            len(validation_rows),
+            ">= 10 valid marker-reference rows in held-out cycles",
+        ),
+    }
+
+def _detect_dynamic_cycles(
+    sync_rows: Sequence[Mapping[str, str]],
+) -> list[dict[str, Any]]:
+    """Detect complete flexion-extension cycles from the marker reference only."""
+    rows = _valid_sync_rows(sync_rows)
+    if len(rows) < 20:
+        return []
+    angles = [float(row["visual_knee_angle_deg"]) for row in rows]
+    low = _percentile(angles, 10.0)
+    high = _percentile(angles, 90.0)
+    span = high - low
+    if not math.isfinite(span) or span < 20.0:
+        return []
+    low_threshold = low + 0.25 * span
+    high_threshold = high - 0.25 * span
+
+    events: list[tuple[str, int]] = []
+    last_state = ""
+    for row, angle in zip(rows, angles):
+        state = "LOW" if angle <= low_threshold else "HIGH" if angle >= high_threshold else "MID"
+        if state == "MID" or state == last_state:
+            continue
+        events.append((state, int(float(row["host_monotonic_ns"]))))
+        last_state = state
+
+    cycles: list[dict[str, Any]] = []
+    event_index = 0
+    while event_index + 2 < len(events):
+        first, middle, last = events[event_index:event_index + 3]
+        if first[0] == last[0] and first[0] != middle[0]:
+            start_ns = first[1]
+            end_ns = last[1]
+            interval_angles = [
+                float(row["visual_knee_angle_deg"])
+                for row in rows
+                if start_ns <= int(float(row["host_monotonic_ns"])) <= end_ns
+            ]
+            cycle_range = max(interval_angles) - min(interval_angles) if interval_angles else 0.0
+            duration_s = (end_ns - start_ns) / 1_000_000_000.0
+            if cycle_range >= max(20.0, 0.45 * span) and 0.5 <= duration_s <= 10.0:
+                cycles.append(
+                    {
+                        "cycle_id": len(cycles) + 1,
+                        "start_host_monotonic_ns": start_ns,
+                        "end_host_monotonic_ns": end_ns,
+                        "duration_s": duration_s,
+                        "range_deg": cycle_range,
+                        "start_extreme": first[0].lower(),
+                    }
+                )
+                event_index += 2
+                continue
+        event_index += 1
+    return cycles
+
+
+def _split_dynamic_cycles(
+    cycles: Sequence[Mapping[str, Any]],
+) -> tuple[list[Mapping[str, Any]], list[Mapping[str, Any]]]:
+    """Deterministic ~75/25 split: every fourth accepted cycle is held out."""
+    accepted = list(cycles)
+    if len(accepted) < MIN_ACCEPTED_DYNAMIC_CYCLES:
+        return accepted, []
+    validation = [cycle for index, cycle in enumerate(accepted, start=1) if index % HELD_OUT_CYCLE_STRIDE == 0]
+    if not validation:
+        validation = [accepted[-1]]
+    validation_ids = {int(cycle["cycle_id"]) for cycle in validation}
+    training = [cycle for cycle in accepted if int(cycle["cycle_id"]) not in validation_ids]
+    return training, validation
+
+
+def _rows_for_cycles(
+    sync_rows: Sequence[Mapping[str, str]],
+    cycles: Sequence[Mapping[str, Any]],
+) -> list[Mapping[str, str]]:
+    valid = _valid_sync_rows(sync_rows)
+    if not cycles:
+        return []
+    windows = [
+        (int(cycle["start_host_monotonic_ns"]), int(cycle["end_host_monotonic_ns"]))
+        for cycle in cycles
+    ]
+    return [
+        row
+        for row in valid
+        if any(start <= int(float(row["host_monotonic_ns"])) < end for start, end in windows)
+    ]
+
+
+def _acceleration_angle_from_row(
+    row: Mapping[str, str],
+    prefix: str,
+    parameters: KneeAngleFilterParameters,
+) -> float:
+    ax = float(row[f"{prefix}_ax_g"])
+    ay = float(row[f"{prefix}_ay_g"])
+    az = float(row[f"{prefix}_az_g"])
+    if parameters.rotation_axis == 0:
+        axis_1 = parameters.acc_axis_1_sign * ay
+        axis_2 = parameters.acc_axis_2_sign * az
+    elif parameters.rotation_axis == 2:
+        axis_1 = parameters.acc_axis_1_sign * ay
+        axis_2 = parameters.acc_axis_2_sign * ax
+    else:
+        axis_1 = parameters.acc_axis_1_sign * az
+        axis_2 = parameters.acc_axis_2_sign * ax
+    return math.degrees(math.atan2(axis_1, axis_2))
+
+
+def _shortest_angle_error_deg(target_deg: float, reference_deg: float) -> float:
+    error = target_deg - reference_deg
+    while error > 180.0:
+        error -= 360.0
+    while error < -180.0:
+        error += 360.0
+    return error
+
+
+def _robust_sigma(values: Sequence[float]) -> float:
+    if not values:
+        return 0.0
+    center = statistics.median(values)
+    mad = statistics.median(abs(float(value) - center) for value in values)
+    return 1.4826 * mad
+
+
+def _static_gravity_valid_fraction(
+    rows: Sequence[Mapping[str, str]],
+    parameters: KneeAngleFilterParameters,
+) -> float:
+    if not rows:
+        return 0.0
+    bound = max(0.15, float(parameters.acc_no_trust_deviation_g))
+    valid = 0
+    for row in rows:
+        try:
+            thigh_norm = math.sqrt(sum(float(row[f"thigh_{axis}_g"]) ** 2 for axis in ("ax", "ay", "az")))
+            shank_norm = math.sqrt(sum(float(row[f"shank_{axis}_g"]) ** 2 for axis in ("ax", "ay", "az")))
+        except (KeyError, TypeError, ValueError):
+            continue
+        if abs(thigh_norm - 1.0) <= bound and abs(shank_norm - 1.0) <= bound:
+            valid += 1
+    return valid / len(rows)
+
+
+def _static_marker_reference_sanity(
+    rows: Sequence[Mapping[str, str]],
+) -> dict[str, Any]:
+    valid = _valid_sync_rows(rows)
+    if not valid:
+        return {
+            "available": False,
+            "used_for_static_derivation": False,
+            "valid_rows": 0,
+            "median_knee_angle_deg": None,
+            "median_error_from_180_deg": None,
+        }
+    angles = [float(row["visual_knee_angle_deg"]) for row in valid]
+    median_angle = statistics.median(angles)
+    return {
+        "available": True,
+        "used_for_static_derivation": False,
+        "valid_rows": len(valid),
+        "median_knee_angle_deg": median_angle,
+        "median_error_from_180_deg": median_angle - 180.0,
     }
 
 
@@ -1143,7 +1344,8 @@ def _write_suggestions_yaml(
     static_suggestion: Mapping[str, Any] | None,
     dynamic_suggestion: Mapping[str, Any] | None,
     final_parameters: Mapping[str, Any] | None,
-    dynamic_score_improvement_percent: float | None = None,
+    held_out_rmse_improvement_percent: float | None = None,
+    cycle_split: Mapping[str, Any] | None = None,
     failed_gates: Sequence[str] | None = None,
     error: str | None = None,
 ) -> None:
@@ -1170,7 +1372,7 @@ def _write_suggestions_yaml(
         "calibration_id": run_id,
         "generated_at": datetime.now().astimezone().isoformat(),
         "status": str(status),
-        "method": "static_offset_bias_plus_dynamic_grid_search",
+        "method": "physics_static_plus_cycle_split_dynamic_grid_search",
         "reference": "synchronized marker-based knee-angle comparison",
         "source_trials": {
             "static": STATIC_ARCHIVE_FILENAME,
@@ -1188,10 +1390,12 @@ def _write_suggestions_yaml(
             dict(final_parameters) if final_parameters is not None else None
         ),
     }
-    if dynamic_score_improvement_percent is not None:
-        payload["dynamic_score_improvement_percent"] = float(
-            dynamic_score_improvement_percent
+    if held_out_rmse_improvement_percent is not None:
+        payload["held_out_rmse_improvement_percent"] = float(
+            held_out_rmse_improvement_percent
         )
+    if cycle_split is not None:
+        payload["cycle_split"] = dict(cycle_split)
     if failed_gates:
         payload["failed_quality_gates"] = list(failed_gates)
     if error:
@@ -1246,7 +1450,7 @@ def _write_calibration_overview(
     axis.legend()
     axis.set_title(
         "Vision–IMU calibration overview\n"
-        f"baseline MAE {baseline_metrics.mae_deg:.2f}° → recommended {recommended_metrics.mae_deg:.2f}°"
+        f"held-out RMSE {baseline_metrics.rmse_deg:.2f}° → recommended {recommended_metrics.rmse_deg:.2f}°"
     )
     figure.tight_layout()
     figure.savefig(path, dpi=150)

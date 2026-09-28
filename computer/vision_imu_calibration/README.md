@@ -13,23 +13,13 @@ relative 3-D segment orientation -> posterior knee angle
 
 The previous MoveNet model, landmark smoothing, confidence threshold, leg selection, and angle-smoothing controls are removed from the active calibration path.
 
-## Patch 2.1 state
+## Current reference-setup state
 
-Patch 1.2 adds the deterministic 3-D geometry layer and fixed reference-quality gates:
-
-- calibrated square-tag pose with `SOLVEPNP_IPPE_SQUARE`,
-- Tag 0 / Tag 1 3-D poses,
-- relative thigh/shank segment angle,
-- posterior knee convention: 180° at collinear extension,
-- camera-resolution consistency check,
-- minimum observed marker size,
-- maximum viewing obliquity,
-- normalized reprojection-error check,
-- per-frame pose-quality metrics in the reference recording.
-
-Patch 2.1 adds the one-time checkerboard camera-calibration workflow. Fifteen diverse 9×6-inner-corner checkerboard views are collected automatically, camera intrinsics/distortion are solved with OpenCV, objective reprojection-error gates are applied, and a successful result is applied immediately to the running 3-D reference.
-
-Patch 2.1 is intentionally **session-only**: it does not write or reload a persistent camera profile. Patch 2.2 owns `reference_setup.yaml`, setup history, reload-on-boot, and persistent setup validation. No uncalibrated 2-D fallback is allowed.
+Patch 1.2 provides the calibrated 3-D two-tag geometry and fixed reference-quality gates.
+Patch 2.1 provides the checkerboard camera-calibration workflow. Patch 2.2 persists a
+successful setup in `reference_setup.yaml`, reloads it on startup, validates the saved
+camera geometry/resolution before use, and records setup history in
+`REFERENCE_SETUP_LOG.txt`. No uncalibrated 2-D fallback is allowed.
 
 ## Mounting contract
 
@@ -46,7 +36,7 @@ The relative angle uses the 3-D proximal axes of the two tags, so common body ro
 
 ## Migration safety gate
 
-The legacy static/dynamic calibration analysis still exists only to preserve the current branch while migration proceeds. It remains explicitly disabled. Patch 3 will replace that analysis with the physics-based static stage and the new dynamic validation logic before scientific IMU tuning is re-enabled.
+Patch 3 enables the scientific calibration workflow. The static stage derives straight-leg offset, gyro bias/noise and deadband from the known full-extension condition and stationary IMU physics; the marker reference is only an optional sanity check in this stage. The dynamic stage detects complete marker-reference cycles, selects temporary grid-search candidates only on training cycles, and reports final performance on held-out cycles that were not used for parameter selection. Candidate-specific time shifting is not used in the primary RMSE objective.
 
 Normal recording remains available throughout the migration.
 
@@ -120,9 +110,7 @@ annotated_reference.mp4
 
 ## Next patch
 
-Patch 2.2 adds:
-
-1. persistent `reference_setup.yaml`,
-2. `REFERENCE_SETUP_LOG.txt`,
-3. automatic loading and validation of the saved camera profile,
-4. setup/version metadata and the persistent validation workflow.
+Patch 4 replaces the temporary deterministic grid search with Gaussian-process
+Bayesian Optimization while preserving the deterministic replay, Patch-3 cycle split,
+and held-out evaluation contract. Patch 4.2 adds final uncertainty/confidence
+reporting and the final browser/YAML presentation.

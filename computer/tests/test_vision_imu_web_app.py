@@ -218,6 +218,10 @@ def test_guided_calibration_is_one_two_stage_session(tmp_path: Path) -> None:
     assert "Continue to dynamic calibration" in html
     assert "Start 5-second countdown" in html
     assert "Wear both IMUs firmly" in html
+    assert "fully extended" in html
+    assert "AprilTags are optional in this static stage" in html
+    assert "const imuReady=" in html
+    assert "const dynamicReady=" in html
     assert 'id="calibrationPath"' in html
     assert "/exports/calibration/" in html
 

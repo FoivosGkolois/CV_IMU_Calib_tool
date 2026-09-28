@@ -1,0 +1,43 @@
+CV_IMU_Calib_tool — Patch 3.1 + 3.2
+===================================
+
+BASELINE
+- CV_IMU_Calib_tool(20260928-190045).zip
+- Patch 2.2 already applied.
+
+PATCH 3.1 — PHYSICS-BASED STATIC CALIBRATION
+- Enables the scientific calibration workflow.
+- Static stage assumes the physical condition: leg fully extended = 180 deg.
+- Straight-leg offset is derived from stationary accelerometer geometry, not from visual-vs-filter disagreement.
+- Thigh/shank gyro bias and short-term gyro noise are measured from stationary raw data.
+- Gyro deadband is derived from robust stationary gyro noise.
+- AprilTag reference is optional during static calibration and is only a sanity check.
+
+PATCH 3.2 — DYNAMIC CYCLE SPLIT + METRICS CLEANUP
+- Detects complete flexion-extension cycles from the synchronized marker reference.
+- Every fourth accepted cycle is held out deterministically (~75/25 split).
+- Held-out cycles are never used to choose filter parameters.
+- Primary candidate objective is synchronized RMSE with no candidate-specific time shift.
+- MAE, P95, max error, lag, jitter and drift remain descriptive metrics.
+- Existing deterministic grid search remains temporarily as the search backend; Patch 4 will replace it with GP Bayesian Optimization.
+
+APPLY
+1. Extract this ZIP into the root of CV_IMU_Calib_tool.
+2. Replace all matching files.
+3. Run the cleanup command supplied in chat using DELETE_FILES_PATCH_3.txt.
+4. Run 13_BUILD_UNO_Q_PHASE2_APP.bat.
+5. Import the newly generated uno_q_phase2_app_ready.zip into Arduino App Lab.
+
+HARDWARE ACCEPTANCE
+- Static stage can start with both IMUs READY even if AprilTags are not currently valid.
+- For static: stand fully extended and still for the full 12 s.
+- Static result should reach AWAITING_DYNAMIC and export bias/noise/deadband/straight offset.
+- Dynamic stage must require VALID marker reference.
+- Perform repeated complete flexion-extension cycles; aim for >= 6 with speed variation.
+- Final report must contain training and held-out cycle IDs/metrics.
+
+DO NOT CHANGE
+- UNO Q Bridge 921600 configuration.
+- IMU raw schema / 100 Hz acquisition contract.
+- AprilTag 3-D reference geometry.
+- recorder/session ownership.
