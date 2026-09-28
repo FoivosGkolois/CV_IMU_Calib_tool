@@ -62,7 +62,10 @@ def _draw_tag(frame: Any, detection: MarkerDetection, label: str, color: tuple[i
 def _draw_reference_badge(frame: Any, result: MarkerReferenceResult) -> None:
     cv2 = _load_cv2()
     if result.valid:
-        status_text = "REFERENCE VALID"
+        if result.angle_deg is None:
+            status_text = "REFERENCE VALID"
+        else:
+            status_text = f"REFERENCE VALID  {result.angle_deg:.1f} deg"
         status_color = VALID_COLOR
     elif result.thigh_detected and result.shank_detected:
         status_text = "TAGS FOUND - SETUP REQUIRED"

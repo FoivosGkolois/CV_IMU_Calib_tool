@@ -1,0 +1,28 @@
+CV_IMU_Calib_tool — Consolidated legacy migration notes
+=======================================================
+
+This file replaces old one-off patch instruction/manifests that are no longer
+needed during normal development. Active source and scientific documentation
+remain in their normal locations.
+
+UNO Q Phase 2 migration (legacy)
+- Moved host-side Vision/IMU application to UNO Q Linux while preserving the
+  deterministic MCU IMUCAL v1 acquisition contract.
+- Added Arduino Bridge transport, App Lab packaging, camera auto-detection,
+  portable output roots, and responsive browser GUI.
+
+V2 marker-reference Patch 1.1
+- Branch: V2_tags_Bayes.
+- Removed the active MoveNet/landmark path.
+- Added AprilTag 36h11 detection with fixed IDs:
+  Tag 0 = thigh, Tag 1 = shank.
+- Added printable 70 mm tags.
+- Kept the knee reference invalid until calibrated 3-D geometry was available.
+
+V2 marker-reference Patch 1.2
+- Adds calibrated 3-D square-tag pose estimation and relative thigh/shank angle.
+- Adds non-user-tunable frame-quality gates and recorded quality metrics.
+- Does not invent an uncalibrated 2-D fallback.
+- Persistent checkerboard camera calibration belongs to Patch 2.1.
+- Scientific IMU calibration remains migration-locked until Patch 3 replaces
+  the legacy static/dynamic calibration analysis.

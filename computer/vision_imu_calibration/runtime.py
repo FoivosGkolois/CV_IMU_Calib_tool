@@ -84,6 +84,12 @@ class RuntimeStatus:
     processing_fps: float
     frame_index: int
     error: str
+    thigh_pose_valid: bool = False
+    shank_pose_valid: bool = False
+    thigh_reprojection_rmse_px: float | None = None
+    shank_reprojection_rmse_px: float | None = None
+    thigh_view_angle_deg: float | None = None
+    shank_view_angle_deg: float | None = None
 
 
 class VisionRuntime:
@@ -110,6 +116,9 @@ class VisionRuntime:
         self.calibration_root.mkdir(parents=True, exist_ok=True)
         self.recorder = AnnotatedVideoRecorder(self.recording_root)
         self.calibration = CalibrationWorkflow(self.calibration_root)
+        # Explicit migration gate. Patch 3 will enable this after replacing the
+        # legacy calibration analysis with the physics-based/held-out workflow.
+        self._calibration_workflow_ready = False
         self._calibration_timer_cancel: threading.Event | None = None
         self._calibration_timer_thread: threading.Thread | None = None
         self._calibration_action_lock = threading.RLock()
@@ -463,12 +472,17 @@ class VisionRuntime:
             payload["reference_backend"] = getattr(
                 self.reference, "description", type(self.reference).__name__
             )
+            reference_configuration = getattr(self.reference, "configuration_status", None)
+            reference_details = (
+                reference_configuration() if callable(reference_configuration) else {}
+            )
             payload["reference"] = {
                 "type": "apriltag",
                 "dictionary": "DICT_APRILTAG_36h11",
                 "thigh_tag_id": int(getattr(self.reference, "thigh_tag_id", 0)),
                 "shank_tag_id": int(getattr(self.reference, "shank_tag_id", 1)),
-                "setup_required": True,
+                "setup_required": not bool(reference_details.get("camera_calibrated", False)),
+                **reference_details,
             }
         recording_payload = asdict(self.recorder.status())
         recording_payload.update(self._recording_export_payload(recording_payload))
@@ -479,6 +493,10 @@ class VisionRuntime:
         payload["camera"] = self.camera_status()
         calibration_payload = asdict(self.calibration.status())
         calibration_payload.update(self._calibration_export_payload(calibration_payload))
+        # Migration safety gate: Patch 1.2 builds the calibrated reference layer,
+        # but the legacy calibration science is intentionally not re-enabled until
+        # Patch 3 replaces the circular/static and dynamic scoring logic.
+        calibration_payload["workflow_ready"] = self._calibration_workflow_ready
         payload["calibration"] = calibration_payload
         return payload
 
@@ -578,6 +596,11 @@ class VisionRuntime:
 
     def start_calibration_test(self, test_type: str) -> dict[str, Any]:
         with self._calibration_action_lock:
+            if not self._calibration_workflow_ready:
+                raise RuntimeError(
+                    "Scientific calibration workflow remains locked until Patch 3 replaces "
+                    "the legacy calibration analysis. Reference recording is still available."
+                )
             if self.recorder.status().active:
                 raise RuntimeError("Stop the current recording before starting calibration")
             status = self.status()
@@ -893,6 +916,8 @@ class VisionRuntime:
                 shank_center = (
                     reference_result.shank.center if reference_result.shank is not None else (None, None)
                 )
+                thigh_pose = reference_result.thigh_pose
+                shank_pose = reference_result.shank_pose
                 sample = {
                     "host_monotonic_ns": host_monotonic_ns,
                     "frame_index": frame_index,
@@ -906,6 +931,20 @@ class VisionRuntime:
                     "thigh_tag_center_y": thigh_center[1],
                     "shank_tag_center_x": shank_center[0],
                     "shank_tag_center_y": shank_center[1],
+                    "thigh_pose_valid": bool(thigh_pose and thigh_pose.valid),
+                    "shank_pose_valid": bool(shank_pose and shank_pose.valid),
+                    "thigh_reprojection_rmse_px": (
+                        thigh_pose.reprojection_rmse_px if thigh_pose is not None else None
+                    ),
+                    "shank_reprojection_rmse_px": (
+                        shank_pose.reprojection_rmse_px if shank_pose is not None else None
+                    ),
+                    "thigh_view_angle_deg": (
+                        thigh_pose.view_angle_deg if thigh_pose is not None else None
+                    ),
+                    "shank_view_angle_deg": (
+                        shank_pose.view_angle_deg if shank_pose is not None else None
+                    ),
                     "processing_fps": ema_fps,
                     "live_imu_filter_valid": imu_estimate.valid,
                     "live_imu_knee_angle_deg": imu_estimate.knee_angle_deg,
@@ -950,6 +989,20 @@ class VisionRuntime:
                         processing_fps=ema_fps,
                         frame_index=frame_index,
                         error=error,
+                        thigh_pose_valid=bool(thigh_pose and thigh_pose.valid),
+                        shank_pose_valid=bool(shank_pose and shank_pose.valid),
+                        thigh_reprojection_rmse_px=(
+                            thigh_pose.reprojection_rmse_px if thigh_pose is not None else None
+                        ),
+                        shank_reprojection_rmse_px=(
+                            shank_pose.reprojection_rmse_px if shank_pose is not None else None
+                        ),
+                        thigh_view_angle_deg=(
+                            thigh_pose.view_angle_deg if thigh_pose is not None else None
+                        ),
+                        shank_view_angle_deg=(
+                            shank_pose.view_angle_deg if shank_pose is not None else None
+                        ),
                     )
                     self._new_frame.notify_all()
         except Exception as exc:

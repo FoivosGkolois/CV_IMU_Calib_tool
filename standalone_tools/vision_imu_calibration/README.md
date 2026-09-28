@@ -120,3 +120,7 @@ calibration_suggestions/calibration_run_<timestamp>/
 The normal recorder writes only to `video_recordings`. Static and dynamic calibration stages write their trial archives and one shared `imu_filter_suggestions.yaml` inside the same calibration run directory. Browser links expose project-relative paths rather than machine-specific absolute paths.
 
 Phase 2 intentionally does not add motor control. The MCU remains dedicated to deterministic sensor acquisition, and Linux owns the heavy processing and experiment workflow.
+
+## V2 marker-reference migration note
+
+Patch 1.2 adds the calibrated 3-D two-tag geometry and fixed frame-quality gates to the Linux/Python reference layer. The live knee reference remains invalid until Patch 2.1 supplies persistent checkerboard camera intrinsics matching the active processed image resolution. The legacy scientific calibration analysis remains locked until its Patch 3 replacement; normal reference/IMU recording remains available.

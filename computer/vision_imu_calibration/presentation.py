@@ -131,7 +131,7 @@ def _write_overview_plot(rows: list[dict[str, str]], path: Path) -> None:
         return
     figure = plt.figure(figsize=(11, 5.5))
     axis = figure.add_subplot(111)
-    axis.plot(time_values, visual, label="Visual posterior knee angle")
+    axis.plot(time_values, visual, label="Marker-reference posterior knee angle")
     axis.plot(time_values, imu, label="Current IMU filter output")
     axis.set_xlabel("Recording time [s]")
     axis.set_ylabel("Posterior knee angle [deg]")

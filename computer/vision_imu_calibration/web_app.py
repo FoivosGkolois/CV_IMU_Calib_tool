@@ -115,7 +115,7 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
 <section class="live-column">
   <div class="live-summary">
     <div class="summary-card"><div class="label">Tag reference</div><div id="tracking" class="value">Starting…</div><div id="reason" class="small">Initializing camera and tag detector</div></div>
-    <div class="summary-card"><div class="label">Reference angle</div><div id="angle" class="value">--.-°</div><div id="referenceNote" class="small">3-D setup required</div></div>
+    <div class="summary-card"><div class="label">Reference angle</div><div id="angle" class="value">--.-°</div><div id="referenceNote" class="small">Camera calibration required</div></div>
     <div class="summary-card"><div class="label">IMU angle</div><div id="imuAngle" class="value">--.-°</div><div id="imuEstimatorState" class="small">NO SAMPLE</div></div>
     <div class="summary-card"><div class="label">Tags</div><div id="tagStatus" class="value">0 / 2</div><div id="fps" class="small">0.0 FPS</div></div>
   </div>
@@ -191,7 +191,8 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
     <summary><span class="label">Tag reference</span></summary>
     <div id="thighTagState" class="note">Thigh · Tag 0: NOT DETECTED</div>
     <div id="shankTagState" class="note">Shank · Tag 1: NOT DETECTED</div>
-    <div class="note">The old pose model and its tuning sliders are removed. V2.1 detects the two fixed tags only. The calibrated 3-D knee angle is intentionally locked until the persistent reference setup is added.</div>
+    <div id="referenceQuality" class="note">3-D pose quality: waiting for calibrated camera setup.</div>
+    <div class="note">Patch 1.2 contains the calibrated 3-D relative-angle geometry and fixed quality gates. Patch 2.1 will add the persistent checkerboard camera setup that activates them during normal use.</div>
   </details>
 
   <details class="card wide">
@@ -215,7 +216,7 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
     </div>
   </div>
 </div>
-<footer>Live acquisition with a fixed two-tag geometric reference. Calibration remains locked until the persistent 3-D reference setup is completed.</footer>
+<footer>Fixed two-tag geometric reference. The 3-D engine is calibration-gated; scientific IMU tuning remains locked until its later migration step.</footer>
 <script>
 const reason=document.getElementById('reason');
 const angle=document.getElementById('angle');
@@ -223,6 +224,7 @@ const referenceNote=document.getElementById('referenceNote');
 const tagStatus=document.getElementById('tagStatus');
 const thighTagState=document.getElementById('thighTagState');
 const shankTagState=document.getElementById('shankTagState');
+const referenceQuality=document.getElementById('referenceQuality');
 const fps=document.getElementById('fps');
 const source=document.getElementById('source');
 const backend=document.getElementById('backend');
@@ -465,7 +467,8 @@ async function refresh(){
     t.textContent=s.tracking_valid?'VALID':'INVALID'; t.className='value '+(s.tracking_valid?'ok':'bad');
     reason.textContent=s.tracking_reason||'—';
     angle.textContent=s.visual_knee_angle_deg==null?'--.-°':Number(s.visual_knee_angle_deg).toFixed(1)+'°';
-    referenceNote.textContent=s.tracking_valid?'Calibrated 3-D tag reference':'3-D setup required';
+    const referenceConfig=s.reference||{};
+    referenceNote.textContent=s.tracking_valid?'Calibrated 3-D tag reference':(referenceConfig.setup_required?'Camera calibration required':'Reference quality gate failed');
     const detected=Number(Boolean(s.thigh_tag_detected))+Number(Boolean(s.shank_tag_detected));
     tagStatus.textContent=detected+' / 2';
     tagStatus.className='value '+(detected===2?'ok':'bad');
@@ -473,6 +476,8 @@ async function refresh(){
     thighTagState.className='note '+(s.thigh_tag_detected?'ok':'bad');
     shankTagState.textContent='Shank · Tag 1: '+(s.shank_tag_detected?'DETECTED':'NOT DETECTED');
     shankTagState.className='note '+(s.shank_tag_detected?'ok':'bad');
+    const fmtMetric=(value,suffix)=>value==null?'—':Number(value).toFixed(2)+suffix;
+    referenceQuality.textContent='3-D pose · thigh reproj '+fmtMetric(s.thigh_reprojection_rmse_px,' px')+' / view '+fmtMetric(s.thigh_view_angle_deg,'°')+' · shank reproj '+fmtMetric(s.shank_reprojection_rmse_px,' px')+' / view '+fmtMetric(s.shank_view_angle_deg,'°');
     fps.textContent=Number(s.processing_fps||0).toFixed(1)+' FPS';
     source.textContent='Source: '+(s.source||'—');
     backend.textContent='Backend: '+(s.reference_backend||'—');
@@ -512,10 +517,11 @@ async function refresh(){
     calibrationState.textContent=String(cal.state||'IDLE').replaceAll('_',' ');
     calibrationState.className='value small '+(cal.valid?'ok':(cal.state==='FAILED'||cal.state==='INVALID'?'bad':''));
     calibrationMessage.textContent=cal.error?`${cal.message||''} Error: ${cal.error}`:(cal.message||'Start calibration with the static stage.');
+    if(!cal.workflow_ready) calibrationMessage.textContent='Scientific IMU calibration remains locked during the V2 migration. Reference recording and inspection remain available.';
     calibrationProgress.style.width=(100*Number(cal.progress||0)).toFixed(1)+'%';
     updateImuRecommendations(cal);
     const calibrationBusy=Boolean(cal.active)||String(cal.state||'').startsWith('ANALYZING');
-    const sourceReady=Boolean(imu.connected)&&Boolean(imu.thigh_ready&&imu.shank_ready)&&Boolean(s.tracking_valid);
+    const sourceReady=Boolean(cal.workflow_ready)&&Boolean(imu.connected)&&Boolean(imu.thigh_ready&&imu.shank_ready)&&Boolean(s.tracking_valid);
     startStaticTest.disabled=calibrationBusy||Boolean((s.recording||{}).active)||!sourceReady||cal.state==='AWAITING_DYNAMIC';
     startStaticTest.textContent=(cal.state==='COMPLETE'||cal.state==='FAILED')?'Start new calibration':'Start calibration';
     startDynamicTest.disabled=calibrationBusy||Boolean((s.recording||{}).active)||!sourceReady||!Boolean(cal.static_suggestion&&Object.keys(cal.static_suggestion).length)||!['AWAITING_DYNAMIC','INVALID'].includes(cal.state);

@@ -1,12 +1,61 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from math import acos, degrees
+from typing import Any, Iterable, Mapping
 
 
 APRILTAG_DICTIONARY_NAME = "DICT_APRILTAG_36h11"
 THIGH_TAG_ID = 0
 SHANK_TAG_ID = 1
+TAG_SIZE_M = 0.070
+
+# Frozen engineering quality gates for the reference layer. These are not exposed
+# as routine user tuning controls. Patch 2.1 will provide the calibrated camera
+# model that activates this geometry path.
+MIN_MARKER_SIDE_PX = 20.0
+MAX_VIEW_ANGLE_DEG = 65.0
+MAX_NORMALIZED_REPROJECTION_RMSE = 0.05
+
+
+@dataclass(frozen=True)
+class CameraCalibration:
+    """Validated camera intrinsics required by the 3-D marker reference."""
+
+    camera_matrix: tuple[tuple[float, float, float], ...]
+    distortion_coefficients: tuple[float, ...]
+    image_width: int
+    image_height: int
+
+    @classmethod
+    def from_values(
+        cls,
+        camera_matrix: Any,
+        distortion_coefficients: Any,
+        *,
+        image_width: int,
+        image_height: int,
+    ) -> "CameraCalibration":
+        import numpy as np
+
+        matrix = np.asarray(camera_matrix, dtype=float)
+        distortion = np.asarray(distortion_coefficients, dtype=float).reshape(-1)
+        if matrix.shape != (3, 3):
+            raise ValueError("camera_matrix must be 3x3")
+        if not np.all(np.isfinite(matrix)) or not np.all(np.isfinite(distortion)):
+            raise ValueError("camera calibration contains non-finite values")
+        if matrix[0, 0] <= 0.0 or matrix[1, 1] <= 0.0:
+            raise ValueError("camera focal lengths must be positive")
+        width = int(image_width)
+        height = int(image_height)
+        if width <= 0 or height <= 0:
+            raise ValueError("camera calibration image dimensions must be positive")
+        return cls(
+            camera_matrix=tuple(tuple(float(value) for value in row) for row in matrix),
+            distortion_coefficients=tuple(float(value) for value in distortion),
+            image_width=width,
+            image_height=height,
+        )
 
 
 @dataclass(frozen=True)
@@ -22,13 +71,27 @@ class MarkerDetection:
 
 
 @dataclass(frozen=True)
-class MarkerReferenceResult:
-    """One frame of the tag-based geometric reference.
+class MarkerPose:
+    """One calibrated 3-D tag pose plus objective frame-quality metrics."""
 
-    Patch V2.1 intentionally stops at deterministic tag detection. The 3-D angle
-    remains invalid until the persistent camera/reference setup is added in the
-    next patch. This prevents an uncalibrated 2-D shortcut from silently becoming
-    the scientific reference.
+    valid: bool
+    reason: str
+    rvec: tuple[float, float, float] | None = None
+    tvec_m: tuple[float, float, float] | None = None
+    rotation_matrix: tuple[tuple[float, float, float], ...] | None = None
+    reprojection_rmse_px: float | None = None
+    normalized_reprojection_rmse: float | None = None
+    mean_side_px: float | None = None
+    view_angle_deg: float | None = None
+
+
+@dataclass(frozen=True)
+class MarkerReferenceResult:
+    """One frame of the marker-based geometric reference.
+
+    The 3-D path is only valid when calibrated camera intrinsics matching the
+    active image resolution have been configured. Without that setup, tag
+    detection remains available but the scientific angle stays invalid.
     """
 
     angle_deg: float | None
@@ -37,6 +100,8 @@ class MarkerReferenceResult:
     quality: float
     thigh: MarkerDetection | None
     shank: MarkerDetection | None
+    thigh_pose: MarkerPose | None = None
+    shank_pose: MarkerPose | None = None
 
     @property
     def thigh_detected(self) -> bool:
@@ -48,31 +113,73 @@ class MarkerReferenceResult:
 
 
 class AprilTagReference:
-    """Detect the fixed thigh/shank AprilTags from one camera frame.
+    """Two-tag calibrated geometric reference for the knee angle.
 
-    Tag IDs are part of the measurement contract:
-      0 -> thigh
-      1 -> shank
+    Measurement contract:
+      - AprilTag 36h11, Tag 0 -> thigh, Tag 1 -> shank.
+      - Printed black square side -> 70 mm.
+      - The image-top direction of each tag is mounted along the proximal
+        longitudinal direction of its body segment.
+      - Knee convention -> 180 deg at collinear extension, decreasing in flexion.
 
-    No user-tuned smoothing, confidence threshold, or learned pose model is used.
-    3-D pose and the relative knee angle are deliberately gated until a calibrated
-    camera/reference setup is available.
+    Common 3-D body rotation relative to the camera cancels because the angle is
+    derived from the two segment directions in the same calibrated camera frame.
     """
 
     thigh_tag_id = THIGH_TAG_ID
     shank_tag_id = SHANK_TAG_ID
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        calibration: CameraCalibration | None = None,
+        *,
+        tag_size_m: float = TAG_SIZE_M,
+    ) -> None:
         self._cv2: Any | None = None
         self._detector: Any | None = None
         self._dictionary: Any | None = None
+        self._calibration = calibration
+        self._tag_size_m = float(tag_size_m)
+        if not (0.01 <= self._tag_size_m <= 0.5):
+            raise ValueError("tag_size_m is outside the supported engineering range")
 
     @property
     def description(self) -> str:
+        mode = "calibrated 3-D" if self.camera_calibrated else "detection / setup required"
         return (
             f"AprilTag 36h11 geometric reference "
-            f"(thigh={self.thigh_tag_id}, shank={self.shank_tag_id})"
+            f"(thigh={self.thigh_tag_id}, shank={self.shank_tag_id}; {mode})"
         )
+
+    @property
+    def camera_calibrated(self) -> bool:
+        return self._calibration is not None
+
+    @property
+    def tag_size_m(self) -> float:
+        return self._tag_size_m
+
+    def configure_camera(self, calibration: CameraCalibration) -> None:
+        if not isinstance(calibration, CameraCalibration):
+            raise TypeError("calibration must be a CameraCalibration")
+        self._calibration = calibration
+
+    def clear_camera_calibration(self) -> None:
+        self._calibration = None
+
+    def configuration_status(self) -> dict[str, Any]:
+        calibration = self._calibration
+        return {
+            "camera_calibrated": calibration is not None,
+            "image_width": calibration.image_width if calibration is not None else None,
+            "image_height": calibration.image_height if calibration is not None else None,
+            "tag_size_m": self._tag_size_m,
+            "quality_gates": {
+                "min_marker_side_px": MIN_MARKER_SIDE_PX,
+                "max_view_angle_deg": MAX_VIEW_ANGLE_DEG,
+                "max_normalized_reprojection_rmse": MAX_NORMALIZED_REPROJECTION_RMSE,
+            },
+        }
 
     def open(self) -> None:
         try:
@@ -116,27 +223,205 @@ class AprilTagReference:
                     tag_id=tag_id,
                     corners=tuple((float(x), float(y)) for x, y in points),
                 )
+        return self.evaluate_detections(detections, frame_shape=gray.shape)
 
-        thigh = detections.get(self.thigh_tag_id)
-        shank = detections.get(self.shank_tag_id)
-        if thigh is None and shank is None:
-            reason = "missing_both_tags"
-        elif thigh is None:
-            reason = "missing_thigh_tag"
-        elif shank is None:
-            reason = "missing_shank_tag"
+    def evaluate_detections(
+        self,
+        detections: Mapping[int, MarkerDetection] | Iterable[MarkerDetection],
+        *,
+        frame_shape: tuple[int, ...],
+    ) -> MarkerReferenceResult:
+        """Evaluate already-detected tags; useful for deterministic replay/tests."""
+        if isinstance(detections, Mapping):
+            by_id = dict(detections)
         else:
-            reason = "reference_setup_required"
+            by_id = {detection.tag_id: detection for detection in detections}
 
-        # V2.1 does not invent an angle from uncalibrated 2-D geometry.
-        quality = 1.0 if thigh is not None and shank is not None else (0.5 if thigh or shank else 0.0)
+        thigh = by_id.get(self.thigh_tag_id)
+        shank = by_id.get(self.shank_tag_id)
+        if thigh is None and shank is None:
+            return self._invalid("missing_both_tags", thigh, shank, quality=0.0)
+        if thigh is None:
+            return self._invalid("missing_thigh_tag", thigh, shank, quality=0.5)
+        if shank is None:
+            return self._invalid("missing_shank_tag", thigh, shank, quality=0.5)
+
+        calibration = self._calibration
+        if calibration is None:
+            return self._invalid("reference_setup_required", thigh, shank, quality=1.0)
+
+        height, width = int(frame_shape[0]), int(frame_shape[1])
+        if width != calibration.image_width or height != calibration.image_height:
+            return self._invalid(
+                "camera_resolution_mismatch",
+                thigh,
+                shank,
+                quality=0.0,
+            )
+
+        thigh_pose = self._estimate_pose(thigh)
+        shank_pose = self._estimate_pose(shank)
+        valid_pose_count = int(thigh_pose.valid) + int(shank_pose.valid)
+        quality = valid_pose_count / 2.0
+        if not thigh_pose.valid:
+            return self._invalid(
+                f"thigh_pose_{thigh_pose.reason}",
+                thigh,
+                shank,
+                quality=quality,
+                thigh_pose=thigh_pose,
+                shank_pose=shank_pose,
+            )
+        if not shank_pose.valid:
+            return self._invalid(
+                f"shank_pose_{shank_pose.reason}",
+                thigh,
+                shank,
+                quality=quality,
+                thigh_pose=thigh_pose,
+                shank_pose=shank_pose,
+            )
+
+        angle_deg = self._posterior_knee_angle_deg(thigh_pose, shank_pose)
+        return MarkerReferenceResult(
+            angle_deg=angle_deg,
+            valid=True,
+            reason="ok_3d_reference",
+            quality=1.0,
+            thigh=thigh,
+            shank=shank,
+            thigh_pose=thigh_pose,
+            shank_pose=shank_pose,
+        )
+
+    def _estimate_pose(self, detection: MarkerDetection) -> MarkerPose:
+        import numpy as np
+
+        if self._cv2 is None:
+            raise RuntimeError("AprilTag reference is not open")
+        calibration = self._calibration
+        if calibration is None:
+            return MarkerPose(valid=False, reason="reference_setup_required")
+
+        image_points = np.asarray(detection.corners, dtype=np.float64)
+        side_lengths = np.linalg.norm(image_points - np.roll(image_points, -1, axis=0), axis=1)
+        mean_side_px = float(np.mean(side_lengths))
+        if not np.isfinite(mean_side_px) or mean_side_px < MIN_MARKER_SIDE_PX:
+            return MarkerPose(
+                valid=False,
+                reason="marker_too_small",
+                mean_side_px=mean_side_px,
+            )
+
+        half = self._tag_size_m / 2.0
+        object_points = np.asarray(
+            [
+                [-half, +half, 0.0],
+                [+half, +half, 0.0],
+                [+half, -half, 0.0],
+                [-half, -half, 0.0],
+            ],
+            dtype=np.float64,
+        )
+        camera_matrix = np.asarray(calibration.camera_matrix, dtype=np.float64)
+        distortion = np.asarray(calibration.distortion_coefficients, dtype=np.float64)
+
+        solved, rvecs, tvecs, _errors = self._cv2.solvePnPGeneric(
+            object_points,
+            image_points,
+            camera_matrix,
+            distortion,
+            flags=self._cv2.SOLVEPNP_IPPE_SQUARE,
+        )
+        if int(solved) <= 0 or not rvecs or not tvecs:
+            return MarkerPose(valid=False, reason="solvepnp_failed", mean_side_px=mean_side_px)
+
+        candidates: list[tuple[float, Any, Any, float]] = []
+        for rvec, tvec in zip(rvecs, tvecs):
+            projected, _ = self._cv2.projectPoints(
+                object_points,
+                rvec,
+                tvec,
+                camera_matrix,
+                distortion,
+            )
+            projected = projected.reshape(-1, 2)
+            rmse = float(np.sqrt(np.mean(np.sum((projected - image_points) ** 2, axis=1))))
+            depth = float(np.asarray(tvec, dtype=float).reshape(3)[2])
+            candidates.append((rmse, rvec, tvec, depth))
+
+        positive_depth = [candidate for candidate in candidates if candidate[3] > 0.0]
+        if not positive_depth:
+            return MarkerPose(valid=False, reason="pose_behind_camera", mean_side_px=mean_side_px)
+        rmse, rvec, tvec, _depth = min(positive_depth, key=lambda candidate: candidate[0])
+        normalized_rmse = rmse / max(mean_side_px, 1e-9)
+
+        rotation_matrix_np, _ = self._cv2.Rodrigues(rvec)
+        tag_normal = rotation_matrix_np @ np.asarray([0.0, 0.0, 1.0], dtype=float)
+        normal_z = min(1.0, max(0.0, abs(float(tag_normal[2]))))
+        view_angle_deg = degrees(acos(normal_z))
+
+        rvec_tuple = tuple(float(value) for value in np.asarray(rvec).reshape(3))
+        tvec_tuple = tuple(float(value) for value in np.asarray(tvec).reshape(3))
+        rotation_tuple = tuple(
+            tuple(float(value) for value in row) for row in np.asarray(rotation_matrix_np)
+        )
+        common = {
+            "rvec": rvec_tuple,
+            "tvec_m": tvec_tuple,
+            "rotation_matrix": rotation_tuple,
+            "reprojection_rmse_px": rmse,
+            "normalized_reprojection_rmse": normalized_rmse,
+            "mean_side_px": mean_side_px,
+            "view_angle_deg": view_angle_deg,
+        }
+        if normalized_rmse > MAX_NORMALIZED_REPROJECTION_RMSE:
+            return MarkerPose(valid=False, reason="high_reprojection_error", **common)
+        if view_angle_deg > MAX_VIEW_ANGLE_DEG:
+            return MarkerPose(valid=False, reason="view_too_oblique", **common)
+        return MarkerPose(valid=True, reason="ok", **common)
+
+    @staticmethod
+    def _posterior_knee_angle_deg(thigh_pose: MarkerPose, shank_pose: MarkerPose) -> float:
+        import numpy as np
+
+        if thigh_pose.rotation_matrix is None or shank_pose.rotation_matrix is None:
+            raise ValueError("Both marker poses need rotation matrices")
+        thigh_rotation = np.asarray(thigh_pose.rotation_matrix, dtype=float)
+        shank_rotation = np.asarray(shank_pose.rotation_matrix, dtype=float)
+
+        # +Y is the image-top direction of the printed marker and is therefore
+        # mounted along each segment's proximal longitudinal direction.
+        tag_proximal_axis = np.asarray([0.0, 1.0, 0.0], dtype=float)
+        thigh_axis = thigh_rotation @ tag_proximal_axis
+        shank_axis = shank_rotation @ tag_proximal_axis
+        cosine = float(
+            np.dot(thigh_axis, shank_axis)
+            / (np.linalg.norm(thigh_axis) * np.linalg.norm(shank_axis))
+        )
+        cosine = max(-1.0, min(1.0, cosine))
+        flexion_from_extension_deg = degrees(acos(cosine))
+        return float(180.0 - flexion_from_extension_deg)
+
+    @staticmethod
+    def _invalid(
+        reason: str,
+        thigh: MarkerDetection | None,
+        shank: MarkerDetection | None,
+        *,
+        quality: float,
+        thigh_pose: MarkerPose | None = None,
+        shank_pose: MarkerPose | None = None,
+    ) -> MarkerReferenceResult:
         return MarkerReferenceResult(
             angle_deg=None,
             valid=False,
             reason=reason,
-            quality=quality,
+            quality=float(quality),
             thigh=thigh,
             shank=shank,
+            thigh_pose=thigh_pose,
+            shank_pose=shank_pose,
         )
 
     def generate_marker_image(self, tag_id: int, side_pixels: int = 1000) -> Any:
