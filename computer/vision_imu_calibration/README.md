@@ -13,7 +13,7 @@ relative 3-D segment orientation -> posterior knee angle
 
 The previous MoveNet model, landmark smoothing, confidence threshold, leg selection, and angle-smoothing controls are removed from the active calibration path.
 
-## Patch 1.2 state
+## Patch 2.1 state
 
 Patch 1.2 adds the deterministic 3-D geometry layer and fixed reference-quality gates:
 
@@ -27,9 +27,9 @@ Patch 1.2 adds the deterministic 3-D geometry layer and fixed reference-quality 
 - normalized reprojection-error check,
 - per-frame pose-quality metrics in the reference recording.
 
-The angle is intentionally **invalid until calibrated camera intrinsics are supplied**. Patch 2.1 will add the one-time checkerboard workflow and persistent `reference_setup.yaml` that loads those intrinsics automatically.
+Patch 2.1 adds the one-time checkerboard camera-calibration workflow. Fifteen diverse 9×6-inner-corner checkerboard views are collected automatically, camera intrinsics/distortion are solved with OpenCV, objective reprojection-error gates are applied, and a successful result is applied immediately to the running 3-D reference.
 
-This means Patch 1.2 can be unit-tested completely, while normal hardware operation still reports `reference_setup_required` until Patch 2.1 is applied. No uncalibrated 2-D fallback is allowed.
+Patch 2.1 is intentionally **session-only**: it does not write or reload a persistent camera profile. Patch 2.2 owns `reference_setup.yaml`, setup history, reload-on-boot, and persistent setup validation. No uncalibrated 2-D fallback is allowed.
 
 ## Mounting contract
 
@@ -76,12 +76,18 @@ opencv-contrib-python-headless
 
 OpenCV contrib is required for the AprilTag dictionary support.
 
-## Required printed markers
+## Required printed reference targets
 
-Printable tag assets and the mounting contract are under:
+Printable AprilTag assets and the mounting contract are under:
 
 ```text
 reference_setup/tags/
+```
+
+The Patch 2.1 checkerboard and exact-size printing instructions are under:
+
+```text
+reference_setup/checkerboard/
 ```
 
 ## Normal outputs
@@ -114,9 +120,9 @@ annotated_reference.mp4
 
 ## Next patch
 
-Patch 2.1 adds:
+Patch 2.2 adds:
 
-1. checkerboard camera calibration,
-2. persistent `reference_setup.yaml`,
+1. persistent `reference_setup.yaml`,
+2. `REFERENCE_SETUP_LOG.txt`,
 3. automatic loading and validation of the saved camera profile,
-4. activation of the Patch 1.2 3-D reference on matching camera/resolution.
+4. setup/version metadata and the persistent validation workflow.

@@ -44,6 +44,16 @@ class FakeRuntime:
                 "dynamic_suggestion": {},
             },
             "imu": {"transport": "serial"},
+            "camera_calibration": {
+                "active": False,
+                "state": "IDLE",
+                "message": "Ready",
+                "accepted_views": 0,
+                "required_views": 15,
+                "checkerboard_detected": False,
+                "rms_reprojection_error_px": None,
+                "persistent": False,
+            },
         }
 
     def tuning(self):
@@ -66,6 +76,12 @@ class FakeRuntime:
     def update_camera_profile(self, profile: str):
         self.profile = profile
         return {"profile": profile, "width": 1280, "height": 720, "fps": 30.0}
+
+    def start_camera_calibration(self):
+        return {"active": True, "state": "CAPTURING", "accepted_views": 0, "required_views": 15}
+
+    def cancel_camera_calibration(self):
+        return {"active": False, "state": "IDLE"}
 
     def start_recording(self):
         return {"active": True}
@@ -248,3 +264,29 @@ def test_export_routes_list_and_serve_owned_files_without_traversal(tmp_path: Pa
 
     assert client.get("/exports/recordings/../secret.txt").status_code == 404
     assert client.get("/exports/calibration/../../secret.txt").status_code == 404
+
+
+def test_checkerboard_camera_calibration_routes_and_controls(tmp_path: Path) -> None:
+    runtime = FakeRuntime(tmp_path)
+    client = create_app(runtime).test_client()  # type: ignore[arg-type]
+    html = client.get("/").get_data(as_text=True)
+    assert "Reference camera calibration" in html
+    assert "Start checkerboard calibration" in html
+    assert "15 diverse views" in html
+    started = client.post("/api/reference/camera-calibration/start")
+    assert started.status_code == 200
+    assert started.get_json()["state"] == "CAPTURING"
+    cancelled = client.post("/api/reference/camera-calibration/cancel")
+    assert cancelled.status_code == 200
+    assert cancelled.get_json()["state"] == "IDLE"
+
+
+def test_page_autoscales_dashboard_to_viewport_without_page_scroll(tmp_path: Path) -> None:
+    runtime = FakeRuntime(tmp_path)
+    html = create_app(runtime).test_client().get("/").get_data(as_text=True)  # type: ignore[arg-type]
+
+    assert 'id="dashboardFit"' in html
+    assert "overflow:hidden" in html
+    assert "fitDashboardToViewport" in html
+    assert "dashboardFit.style.zoom" in html
+    assert "scheduleDashboardFit" in html

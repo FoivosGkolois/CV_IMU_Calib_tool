@@ -72,6 +72,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--imu-port", help="Calibration serial port, e.g. COM3")
     parser.add_argument("--imu-baud", type=int, default=IMUCAL_BAUD_RATE)
     parser.add_argument(
+        "--reference-setup-root",
+        type=Path,
+        default=None,
+        help="Persistent reference-setup directory (defaults to <project>/reference_setup).",
+    )
+    parser.add_argument(
         "--filter-config",
         type=Path,
         default=None,
@@ -124,6 +130,11 @@ def main(argv: list[str] | None = None) -> int:
     project_root = resolve_project_root()
     recording_root = project_root / "video_recordings"
     calibration_root = project_root / "calibration_suggestions"
+    reference_setup_root = (
+        args.reference_setup_root.expanduser().resolve()
+        if args.reference_setup_root is not None
+        else project_root / "reference_setup"
+    )
 
     runtime = VisionRuntime(
         camera,
@@ -133,6 +144,7 @@ def main(argv: list[str] | None = None) -> int:
         imu_source=imu_source,
         imu_filter=imu_filter,
         imu_filter_config_path=filter_config_path,
+        reference_setup_root=reference_setup_root,
     )
     runtime.start()
     app = create_app(runtime)
@@ -150,6 +162,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"IMU filter config: {filter_config_path}")
     print(f"Video recordings: {recording_root}")
     print(f"Calibration suggestions: {calibration_root}")
+    print(f"Persistent reference setup: {reference_setup_root}")
     print("Stop with Ctrl+C.")
     if not args.no_browser:
         threading.Thread(target=_open_browser, args=(url,), daemon=True).start()

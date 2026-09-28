@@ -9,6 +9,7 @@ from typing import Any, Mapping
 from urllib.parse import quote
 
 from .calibration_workflow import CalibrationWorkflow
+from .camera_calibration import CheckerboardCalibrationSession
 from .camera_source import OpenCvCameraSource
 from .imu_filter import (
     KneeAngleEstimate,
@@ -19,6 +20,7 @@ from .imu_serial import IMUCAL_BAUD_RATE, SerialImuSource, list_serial_ports
 from .marker_reference import AprilTagReference, MarkerReferenceResult
 from .overlay import draw_marker_overlay
 from .recorder import AnnotatedVideoRecorder
+from .reference_setup import ReferenceSetupStore
 from .tuning import FrameRotation, RuntimeTuning
 
 
@@ -106,16 +108,34 @@ class VisionRuntime:
         imu_source_factory: Any = SerialImuSource,
         imu_filter: KneeAngleFilterMirror | None = None,
         imu_filter_config_path: str | Path | None = None,
+        reference_setup_root: str | Path | None = None,
     ) -> None:
         self.camera = camera
         self.reference = reference
         self._tuning = RuntimeTuning()
         self.recording_root = Path(recording_root).expanduser().resolve()
         self.calibration_root = Path(calibration_root).expanduser().resolve()
+        self.reference_setup_root = (
+            Path(reference_setup_root).expanduser().resolve()
+            if reference_setup_root is not None
+            else self.calibration_root.parent / "reference_setup"
+        )
         self.recording_root.mkdir(parents=True, exist_ok=True)
         self.calibration_root.mkdir(parents=True, exist_ok=True)
+        self.reference_setup_root.mkdir(parents=True, exist_ok=True)
         self.recorder = AnnotatedVideoRecorder(self.recording_root)
         self.calibration = CalibrationWorkflow(self.calibration_root)
+        self.camera_calibration = CheckerboardCalibrationSession()
+        self.reference_setup_store = ReferenceSetupStore(self.reference_setup_root)
+        self._reference_setup_status: dict[str, Any] = {
+            "persistent": True,
+            "persistent_state": "NOT_LOADED",
+            "persistent_message": "Persistent camera setup has not been checked yet.",
+            "path": str(self.reference_setup_store.yaml_path),
+            "log_path": str(self.reference_setup_store.log_path),
+            "saved_utc": "",
+            "persistent_rms_reprojection_error_px": None,
+        }
         # Explicit migration gate. Patch 3 will enable this after replacing the
         # legacy calibration analysis with the physics-based/held-out workflow.
         self._calibration_workflow_ready = False
@@ -301,6 +321,8 @@ class VisionRuntime:
         }
 
     def update_camera_profile(self, profile_name: str) -> dict[str, Any]:
+        if self.camera_calibration.status()["active"]:
+            raise RuntimeError("Cancel checkerboard camera calibration before changing the camera profile")
         if self._calibration_locked():
             raise RuntimeError("Stop the calibration test before changing the camera profile")
         if self.recorder.status().active:
@@ -346,6 +368,11 @@ class VisionRuntime:
             raise RuntimeError(f"Could not apply camera profile {normalized}: {exc}") from exc
 
         self._camera_profile = normalized
+        clear_camera_calibration = getattr(self.reference, "clear_camera_calibration", None)
+        if callable(clear_camera_calibration):
+            clear_camera_calibration()
+        self.camera_calibration.invalidate_for_camera_change()
+        self._load_persistent_reference_setup()
         self._reset_tracking_event.set()
         next_state = (
             "REFERENCE_FAILED"
@@ -368,6 +395,19 @@ class VisionRuntime:
             self._new_frame.notify_all()
         return self.camera_status()
 
+    def start_camera_calibration(self) -> dict[str, Any]:
+        if self._calibration_locked():
+            raise RuntimeError("Stop the IMU calibration test before camera calibration")
+        if self.recorder.status().active:
+            raise RuntimeError("Stop recording before camera calibration")
+        with self._lock:
+            if self._status.state in {"IDLE", "STARTING", "FAILED", "STOPPED"}:
+                raise RuntimeError("Wait for the live camera preview before camera calibration")
+        return self.camera_calibration.start()
+
+    def cancel_camera_calibration(self) -> dict[str, Any]:
+        return self.camera_calibration.cancel()
+
     def _camera_profile_values(self) -> dict[str, float | int]:
         profile_method = getattr(self.camera, "profile", None)
         if callable(profile_method):
@@ -386,6 +426,76 @@ class VisionRuntime:
                 return name
         return "custom"
 
+
+    def _reference_frame_dimensions(self) -> tuple[int, int]:
+        profile = self._camera_profile_values()
+        width = int(profile["width"])
+        height = int(profile["height"])
+        if self._tuning.frame_rotation in {FrameRotation.CLOCKWISE_90, FrameRotation.COUNTERCLOCKWISE_90}:
+            width, height = height, width
+        return width, height
+
+    def _load_persistent_reference_setup(self) -> None:
+        width, height = self._reference_frame_dimensions()
+        load = self.reference_setup_store.load_camera_calibration(
+            expected_width=width,
+            expected_height=height,
+            expected_frame_rotation=self._tuning.frame_rotation.value,
+        )
+        configure_camera = getattr(self.reference, "configure_camera", None)
+        clear_camera = getattr(self.reference, "clear_camera_calibration", None)
+        if load.valid and callable(configure_camera):
+            configure_camera(load.calibration)
+        elif callable(clear_camera):
+            clear_camera()
+        self._reference_setup_status = {
+            "persistent": True,
+            "persistent_state": load.state,
+            "persistent_message": load.message,
+            "path": str(self.reference_setup_store.yaml_path),
+            "log_path": str(self.reference_setup_store.log_path),
+            "saved_utc": load.saved_utc,
+            "persistent_rms_reprojection_error_px": load.rms_reprojection_error_px,
+        }
+
+    def _persist_reference_setup(self) -> None:
+        result = self.camera_calibration.result()
+        if result is None:
+            return
+        try:
+            self.reference_setup_store.save_camera_calibration(
+                result,
+                camera_description=self.camera.description,
+                camera_fps=float(getattr(self.camera, "fps", 0.0) or 0.0),
+                tag_size_m=float(getattr(self.reference, "tag_size_m", 0.070)),
+                thigh_tag_id=int(getattr(self.reference, "thigh_tag_id", 0)),
+                shank_tag_id=int(getattr(self.reference, "shank_tag_id", 1)),
+                specification=self.camera_calibration.specification,
+                frame_rotation=self._tuning.frame_rotation.value,
+            )
+        except Exception as exc:
+            self._reference_setup_status = {
+                "persistent": True,
+                "persistent_state": "SAVE_FAILED",
+                "persistent_message": f"Camera calibration is active but could not be persisted: {exc}",
+                "path": str(self.reference_setup_store.yaml_path),
+                "log_path": str(self.reference_setup_store.log_path),
+                "saved_utc": "",
+                "persistent_rms_reprojection_error_px": result.rms_reprojection_error_px,
+            }
+            return
+        self._reference_setup_status = {
+            "persistent": True,
+            "persistent_state": "SAVED",
+            "persistent_message": "Camera calibration saved persistently and applied to the 3-D reference.",
+            "path": str(self.reference_setup_store.yaml_path),
+            "log_path": str(self.reference_setup_store.log_path),
+            "saved_utc": "",
+            "persistent_rms_reprojection_error_px": result.rms_reprojection_error_px,
+        }
+        # Re-read the just-written file so status contains the canonical saved timestamp
+        # and the same validation path used on subsequent app starts.
+        self._load_persistent_reference_setup()
 
     def _ensure_imu_thread(self) -> None:
         with self._imu_lock:
@@ -491,6 +601,10 @@ class VisionRuntime:
         payload["imu"] = source.status() if source is not None else _empty_imu_status()
         payload["imu_estimator"] = self.imu_estimator_status()
         payload["camera"] = self.camera_status()
+        camera_calibration_payload = self.camera_calibration.status()
+        camera_calibration_payload.update(self._reference_setup_status)
+        camera_calibration_payload["persistent"] = True
+        payload["camera_calibration"] = camera_calibration_payload
         calibration_payload = asdict(self.calibration.status())
         calibration_payload.update(self._calibration_export_payload(calibration_payload))
         # Migration safety gate: Patch 1.2 builds the calibrated reference layer,
@@ -551,10 +665,20 @@ class VisionRuntime:
             return self._tuning.to_dict()
 
     def update_tuning(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        if self.camera_calibration.status()["active"]:
+            raise RuntimeError("Cancel checkerboard camera calibration before changing camera presentation settings")
         if self._calibration_locked():
             raise RuntimeError("Stop the calibration test before changing camera presentation settings")
         with self._lock:
+            previous_rotation = self._tuning.frame_rotation
             self._tuning = RuntimeTuning.from_mapping(payload, current=self._tuning)
+            rotation_changed = self._tuning.frame_rotation is not previous_rotation
+            if rotation_changed:
+                clear_camera_calibration = getattr(self.reference, "clear_camera_calibration", None)
+                if callable(clear_camera_calibration):
+                    clear_camera_calibration()
+                self.camera_calibration.invalidate_for_camera_change()
+                self._load_persistent_reference_setup()
             self._reset_tracking_event.set()
             return self._tuning.to_dict()
 
@@ -565,6 +689,8 @@ class VisionRuntime:
         return f"{port}@{baud_rate}" if port and baud_rate > 0 else port
 
     def start_recording(self) -> dict[str, Any]:
+        if self.camera_calibration.status()["active"]:
+            raise RuntimeError("Finish or cancel checkerboard camera calibration before recording")
         if self._calibration_locked():
             raise RuntimeError("A calibration test is already recording")
         with self._lock:
@@ -596,6 +722,8 @@ class VisionRuntime:
 
     def start_calibration_test(self, test_type: str) -> dict[str, Any]:
         with self._calibration_action_lock:
+            if self.camera_calibration.status()["active"]:
+                raise RuntimeError("Finish or cancel checkerboard camera calibration first")
             if not self._calibration_workflow_ready:
                 raise RuntimeError(
                     "Scientific calibration workflow remains locked until Patch 3 replaces "
@@ -736,6 +864,7 @@ class VisionRuntime:
         capture_thread: threading.Thread | None = None
         try:
             self.camera.open()
+            self._load_persistent_reference_setup()
             with self._new_frame:
                 self._status = RuntimeStatus(
                     **{
@@ -839,6 +968,14 @@ class VisionRuntime:
                     active_rotation = tuning.frame_rotation
                 frame = self._rotate_frame(frame, tuning.frame_rotation, cv2)
 
+                solved_camera = self.camera_calibration.process_frame(frame)
+                if solved_camera is not None:
+                    configure_camera = getattr(self.reference, "configure_camera", None)
+                    if callable(configure_camera):
+                        configure_camera(solved_camera)
+                        self._persist_reference_setup()
+                        self._reset_tracking_event.set()
+
                 if self._reference_ready.is_set() and not self._reference_failed.is_set():
                     try:
                         reference_result = self.reference.process(frame)
@@ -892,6 +1029,7 @@ class VisionRuntime:
                     source_description=self.camera.description,
                     recording_active=self.recorder.status().active,
                 )
+                annotated = self.camera_calibration.draw_overlay(annotated)
                 ok, encoded = cv2.imencode(".jpg", annotated, [int(cv2.IMWRITE_JPEG_QUALITY), 86])
                 if not ok:
                     continue

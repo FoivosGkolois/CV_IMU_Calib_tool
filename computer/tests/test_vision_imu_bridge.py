@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+import computer.vision_imu_calibration.imu_bridge as imu_bridge_module
 from computer.vision_imu_calibration.imu_bridge import (
     BRIDGE_SAMPLE_METHOD,
     BRIDGE_START_CAPTURE_METHOD,
@@ -137,3 +138,64 @@ def test_bridge_import_failure_is_clear(monkeypatch) -> None:
     monkeypatch.setattr(builtins, "__import__", failing_import)
     with pytest.raises(RuntimeError, match="Arduino App Lab"):
         source.start()
+
+
+class DelayedStatusBridge(FakeBridge):
+    def __init__(self, unavailable_calls: int) -> None:
+        super().__init__()
+        self.unavailable_calls = unavailable_calls
+
+    def call(self, name, *, timeout: int):
+        self.calls.append((name, timeout))
+        if name == BRIDGE_STATUS_METHOD and self.unavailable_calls > 0:
+            self.unavailable_calls -= 1
+            raise ValueError(
+                f"Request '{name}' failed: method {name} not available (2)"
+            )
+        if name == BRIDGE_START_CAPTURE_METHOD:
+            self.flags |= STATUS_CAPTURE_ACTIVE
+        elif name == BRIDGE_STOP_CAPTURE_METHOD:
+            self.flags &= ~STATUS_CAPTURE_ACTIVE
+        return self.flags
+
+
+def test_bridge_start_retries_temporary_method_unavailable(monkeypatch) -> None:
+    bridge = DelayedStatusBridge(unavailable_calls=2)
+    source = BridgeImuSource(bridge_api=bridge)
+    monkeypatch.setattr(imu_bridge_module.time, "sleep", lambda _seconds: None)
+
+    source.start()
+
+    assert [name for name, _ in bridge.calls] == [
+        BRIDGE_STATUS_METHOD,
+        BRIDGE_STATUS_METHOD,
+        BRIDGE_STATUS_METHOD,
+    ]
+    assert source.status()["connected"]
+    assert source.status()["state"] == "CONNECTED"
+
+
+def test_bridge_start_does_not_retry_unrelated_failure(monkeypatch) -> None:
+    class BrokenBridge(FakeBridge):
+        def call(self, name, *, timeout: int):
+            raise ValueError("transport unavailable")
+
+    source = BridgeImuSource(bridge_api=BrokenBridge())
+    monkeypatch.setattr(imu_bridge_module.time, "sleep", lambda _seconds: None)
+
+    with pytest.raises(RuntimeError, match="UNO Q Bridge startup failed"):
+        source.start()
+
+    assert source.status()["state"] == "FAILED"
+
+
+def test_bridge_start_timeout_is_bounded(monkeypatch) -> None:
+    bridge = DelayedStatusBridge(unavailable_calls=100)
+    source = BridgeImuSource(bridge_api=bridge)
+    monkeypatch.setattr(imu_bridge_module, "BRIDGE_STARTUP_WAIT_S", 0.0)
+    monkeypatch.setattr(imu_bridge_module.time, "sleep", lambda _seconds: None)
+
+    with pytest.raises(RuntimeError, match="no MCU route named"):
+        source.start()
+
+    assert source.status()["state"] == "FAILED"

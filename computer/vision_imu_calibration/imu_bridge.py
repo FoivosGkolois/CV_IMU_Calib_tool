@@ -13,6 +13,9 @@ BRIDGE_START_CAPTURE_METHOD = "vision_imu_start_capture"
 BRIDGE_STOP_CAPTURE_METHOD = "vision_imu_stop_capture"
 BRIDGE_STATUS_METHOD = "vision_imu_status_flags"
 
+BRIDGE_STARTUP_WAIT_S = 12.0
+BRIDGE_STARTUP_RETRY_S = 0.25
+
 STATUS_THIGH_READY = 1 << 0
 STATUS_SHANK_READY = 1 << 1
 STATUS_CAPTURE_ACTIVE = 1 << 2
@@ -73,7 +76,7 @@ class BridgeImuSource:
             bridge.provide(BRIDGE_SAMPLE_METHOD, self._handle_sample_notification)
             with self._lock:
                 self._started = True
-            self.request_status(timeout_s=3.0)
+            self._wait_for_mcu_status()
         except Exception as exc:
             with self._lock:
                 self._state = "FAILED"
@@ -85,6 +88,50 @@ class BridgeImuSource:
             except Exception:
                 pass
             raise RuntimeError(f"UNO Q Bridge startup failed: {exc}") from exc
+
+    def _wait_for_mcu_status(self) -> None:
+        deadline = time.monotonic() + BRIDGE_STARTUP_WAIT_S
+        waiting_reported = False
+        attempts = 0
+
+        while True:
+            attempts += 1
+            try:
+                self.request_status(timeout_s=3.0)
+                if waiting_reported:
+                    print(
+                        f"[VISION-IMU] MCU Bridge became available after {attempts} status attempts.",
+                        flush=True,
+                    )
+                return
+            except RuntimeError as exc:
+                if not self._is_method_unavailable_error(exc, BRIDGE_STATUS_METHOD):
+                    raise
+                if time.monotonic() >= deadline:
+                    raise RuntimeError(
+                        "UNO Q MCU Bridge method did not become available within "
+                        f"{BRIDGE_STARTUP_WAIT_S:.0f} s after {attempts} status attempts. "
+                        "The Linux Router answered, but no MCU route named "
+                        f"'{BRIDGE_STATUS_METHOD}' was registered. Check the App Lab MCU/Sketch "
+                        "console for [IMUCAL-DIAG][MCU] Bridge.begin and provide results. "
+                        f"Last Router error: {exc}"
+                    ) from exc
+
+                with self._lock:
+                    self._state = "WAITING_FOR_MCU"
+                    self._last_error = str(exc)
+                if not waiting_reported:
+                    print(
+                        "[VISION-IMU] Waiting for MCU Bridge methods...",
+                        flush=True,
+                    )
+                    waiting_reported = True
+                time.sleep(BRIDGE_STARTUP_RETRY_S)
+
+    @staticmethod
+    def _is_method_unavailable_error(exc: BaseException, method: str) -> bool:
+        message = str(exc).lower()
+        return method.lower() in message and "not available" in message
 
     def stop(self, timeout_s: float = 2.0) -> None:
         if self._capture_active:

@@ -139,3 +139,36 @@ def test_phase2_launcher_reports_copy_paste_ready_url_and_startup_failure() -> N
     assert "ports:" in descriptor and "8765" in descriptor
     assert "WEB GUI READY" in readme
     assert "ERR_CONNECTION_REFUSED" in readme
+
+def test_phase2_sketch_matches_project_router_baud() -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    sketch_path = (
+        project_root
+        / "standalone_tools"
+        / "vision_imu_calibration"
+        / "uno_q_phase2_app_lab_template"
+        / "sketch"
+        / "sketch.ino"
+    )
+    sketch = sketch_path.read_text(encoding="utf-8")
+
+    assert "constexpr unsigned long BRIDGE_BAUD = 921600UL;" in sketch
+    assert "Bridge.begin(BRIDGE_BAUD)" in sketch
+    assert "Bridge.begin();" not in sketch
+
+
+
+def test_phase2_launcher_uses_reserved_persistent_data_directory_for_reference_setup() -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    launcher_path = (
+        project_root
+        / "standalone_tools"
+        / "vision_imu_calibration"
+        / "uno_q_phase2_app_lab_template"
+        / "python"
+        / "main.py"
+    )
+    launcher = launcher_path.read_text(encoding="utf-8")
+
+    assert '"--reference-setup-root",' in launcher
+    assert 'APP_PYTHON_ROOT.parent / "data" / "reference_setup"' in launcher

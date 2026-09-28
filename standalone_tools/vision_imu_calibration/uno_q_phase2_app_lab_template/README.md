@@ -40,3 +40,16 @@ calibration_suggestions/calibration_run_<timestamp>/
 ```
 
 The web GUI provides clickable project-relative export links. One calibration session contains `static_trial.zip`, `dynamic_trial.zip`, and one atomically updated `imu_filter_suggestions.yaml`.
+
+## Persistent camera reference setup
+
+Checkerboard camera calibration is stored under the Arduino App reserved `data/reference_setup/` directory. That directory is the App-owned persistent data area, so a normal Stop/Run or container recreation does not require recalibration. The runtime validates the stored image resolution before enabling the 3-D marker reference; a mismatch or corrupt setup is rejected explicitly.
+
+The persistent files are:
+
+```text
+data/reference_setup/reference_setup.yaml
+data/reference_setup/REFERENCE_SETUP_LOG.txt
+```
+
+Changing camera, lens, resolution, crop, or other optical geometry requires recalibration.

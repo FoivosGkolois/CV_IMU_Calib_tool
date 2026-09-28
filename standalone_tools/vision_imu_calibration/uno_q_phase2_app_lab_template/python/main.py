@@ -132,6 +132,8 @@ def run_vision_imu() -> None:
                 os.environ.get("VISION_IMU_CAMERA_FPS", "30"),
                 "--imu-transport",
                 "uno-q-bridge",
+                "--reference-setup-root",
+                str(APP_PYTHON_ROOT.parent / "data" / "reference_setup"),
                 "--host",
                 "0.0.0.0",
                 "--port",

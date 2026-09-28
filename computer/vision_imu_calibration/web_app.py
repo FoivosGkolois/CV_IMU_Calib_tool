@@ -22,8 +22,9 @@ _PAGE = r'''<!doctype html>
   --text:#eef4ff; --muted:#91a4bf; --blue:#39a0ff; --green:#51e26d; --red:#ff6464;
 }
 * { box-sizing:border-box; }
-html { min-width:320px; }
-body { margin:0; background:var(--bg); color:var(--text); overflow-x:hidden; }
+html, body { width:100%; height:100%; min-width:320px; overflow:hidden; }
+body { margin:0; background:var(--bg); color:var(--text); }
+#dashboardFit { width:100%; transform-origin:top left; }
 main { display:grid; grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) minmax(300px,.8fr); gap:12px; padding:12px; width:100%; margin:0; align-items:start; }
 .camera-column { min-width:0; width:100%; display:flex; justify-content:stretch; align-items:flex-start; }
 .live-column { min-width:0; display:grid; grid-template-rows:auto auto; align-content:start; gap:10px; }
@@ -108,6 +109,7 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
 </style>
 </head>
 <body>
+<div id="dashboardFit">
 <main>
 <section class="camera-column">
   <div id="videoShell" class="video-shell"><img id="videoStream" src="/video.mjpg" alt="Live camera stream"></div>
@@ -168,6 +170,19 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
     <div id="imuHealth" class="note">Samples: 0 · Gaps: 0 · Parse errors: 0 · Queue drops: 0</div>
   </div>
 
+
+  <div class="card wide">
+    <div class="label">Reference camera calibration</div>
+    <div id="cameraCalibrationState" class="value small">IDLE</div>
+    <div id="cameraCalibrationMessage" class="note">Use the printed 9×6 checkerboard before enabling the 3-D reference.</div>
+    <div class="progress-track"><div id="cameraCalibrationProgress" class="progress-fill"></div></div>
+    <div class="button-grid">
+      <button id="startCameraCalibration" class="primary" onclick="cameraCalibrationStart()">Start checkerboard calibration</button>
+      <button id="cancelCameraCalibration" class="secondary" onclick="cameraCalibrationCancel()">Cancel</button>
+    </div>
+    <div id="cameraCalibrationQuality" class="note">15 diverse views · 25 mm squares · persistent after quality acceptance</div>
+  </div>
+
   <div class="card">
     <div class="label">Camera profile</div>
     <select id="cameraProfile" style="margin-top:8px"><option value="fast">Fast · 640×480</option><option value="quality">Quality · 1280×720</option></select>
@@ -192,7 +207,7 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
     <div id="thighTagState" class="note">Thigh · Tag 0: NOT DETECTED</div>
     <div id="shankTagState" class="note">Shank · Tag 1: NOT DETECTED</div>
     <div id="referenceQuality" class="note">3-D pose quality: waiting for calibrated camera setup.</div>
-    <div class="note">Patch 1.2 contains the calibrated 3-D relative-angle geometry and fixed quality gates. Patch 2.1 will add the persistent checkerboard camera setup that activates them during normal use.</div>
+    <div class="note">The calibrated 3-D relative-angle geometry uses the persistent checkerboard camera setup and fixed quality gates.</div>
   </details>
 
   <details class="card wide">
@@ -204,6 +219,8 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
   </details>
 </aside>
 </main>
+<footer>Fixed two-tag geometric reference. Persistent camera setup is calibration-gated; scientific IMU tuning remains locked until its later migration step.</footer>
+</div>
 <div id="calibrationModal" class="modal-backdrop" hidden>
   <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="calibrationModalTitle">
     <h2 id="calibrationModalTitle">Calibration test</h2>
@@ -216,7 +233,6 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
     </div>
   </div>
 </div>
-<footer>Fixed two-tag geometric reference. The 3-D engine is calibration-gated; scientific IMU tuning remains locked until its later migration step.</footer>
 <script>
 const reason=document.getElementById('reason');
 const angle=document.getElementById('angle');
@@ -273,6 +289,22 @@ const reloadImuFilter=document.getElementById('reloadImuFilter');
 const angleChart=document.getElementById('angleChart');
 const videoShell=document.getElementById('videoShell');
 const videoStream=document.getElementById('videoStream');
+const dashboardFit=document.getElementById('dashboardFit');
+let dashboardFitPending=false;
+function fitDashboardToViewport(){
+  if(!dashboardFit) return;
+  dashboardFit.style.zoom='1';
+  const naturalWidth=Math.max(1,dashboardFit.scrollWidth);
+  const naturalHeight=Math.max(1,dashboardFit.scrollHeight);
+  const scale=Math.min(1, window.innerWidth/naturalWidth, window.innerHeight/naturalHeight);
+  dashboardFit.style.zoom=String(Math.max(0.1,scale));
+  dashboardFitPending=false;
+}
+function scheduleDashboardFit(){
+  if(dashboardFitPending) return;
+  dashboardFitPending=true;
+  window.requestAnimationFrame(fitDashboardToViewport);
+}
 function resizeVideoShell(){
   const naturalWidth=Number(videoStream.naturalWidth||0);
   const naturalHeight=Number(videoStream.naturalHeight||0);
@@ -281,7 +313,7 @@ function resizeVideoShell(){
   drawAngleChart(window.latestAngleRows||[]);
 }
 videoStream.addEventListener('load',resizeVideoShell);
-window.addEventListener('resize',()=>{ resizeVideoShell(); drawAngleChart(window.latestAngleRows||[]); },{passive:true});
+window.addEventListener('resize',()=>{ resizeVideoShell(); drawAngleChart(window.latestAngleRows||[]); scheduleDashboardFit(); },{passive:true});
 if('ResizeObserver' in window){
   const observer=new ResizeObserver(()=>drawAngleChart(window.latestAngleRows||[]));
   observer.observe(angleChart.parentElement);
@@ -324,6 +356,16 @@ async function setCameraProfile(){
   } catch(e) { cameraProfileMessage.textContent='Camera profile failed: '+e; }
   finally { applyCameraProfile.disabled=false; setTimeout(resizeVideoShell,350); }
 }
+async function cameraCalibrationStart(){
+  cameraCalibrationMessage.textContent='Starting checkerboard capture…';
+  const r=await fetch('/api/reference/camera-calibration/start',{method:'POST'}); const body=await r.json();
+  cameraCalibrationMessage.textContent=r.ok?(body.message||'Checkerboard calibration started.'):('Camera calibration failed to start: '+(body.error||'unknown error'));
+}
+async function cameraCalibrationCancel(){
+  const r=await fetch('/api/reference/camera-calibration/cancel',{method:'POST'}); const body=await r.json();
+  cameraCalibrationMessage.textContent=r.ok?(body.message||'Checkerboard calibration cancelled.'):('Cancel failed: '+(body.error||'unknown error'));
+}
+
 const CALIBRATION_GUIDANCE={
   static:{
     title:'Static calibration test',
@@ -512,7 +554,21 @@ async function refresh(){
     if(imu.port && [...imuPort.options].some(o=>o.value===imu.port)) imuPort.value=imu.port;
     const camera=s.camera||{};
     if(!window.cameraProfileLoaded && camera.profile){ cameraProfile.value=camera.profile; window.cameraProfileLoaded=true; }
-    applyCameraProfile.disabled=Boolean((s.recording||{}).active)||calibrationLocked||camera.reconfigurable===false||!['CAMERA_PREVIEW','RUNNING','REFERENCE_FAILED'].includes(s.state);
+    const camCal=s.camera_calibration||{};
+    cameraCalibrationState.textContent=String(camCal.state||'IDLE').replaceAll('_',' ');
+    cameraCalibrationState.className='value small '+(camCal.state==='COMPLETE'?'ok':(camCal.state==='FAILED'?'bad':''));
+    cameraCalibrationMessage.textContent=camCal.message||'Use the printed checkerboard before enabling the 3-D reference.';
+    const acceptedViews=Number(camCal.accepted_views||0), requiredViews=Math.max(1,Number(camCal.required_views||15));
+    cameraCalibrationProgress.style.width=(100*Math.min(1,acceptedViews/requiredViews)).toFixed(1)+'%';
+    const detectedText=camCal.checkerboard_detected?'checkerboard detected':'checkerboard not detected';
+    const rmsText=camCal.rms_reprojection_error_px==null?'RMS —':('RMS '+Number(camCal.rms_reprojection_error_px).toFixed(2)+' px');
+    const persistentState=String(camCal.persistent_state||'NOT LOADED').replaceAll('_',' ');
+    const savedText=camCal.saved_utc?(' · saved '+camCal.saved_utc):'';
+    cameraCalibrationQuality.textContent=`${acceptedViews}/${requiredViews} views · ${detectedText} · ${rmsText} · persistent ${persistentState}${savedText}`;
+    const cameraCalibrationBusy=Boolean(camCal.active);
+    startCameraCalibration.disabled=cameraCalibrationBusy||Boolean((s.recording||{}).active)||calibrationLocked||!['CAMERA_PREVIEW','RUNNING','REFERENCE_FAILED'].includes(s.state);
+    cancelCameraCalibration.disabled=!cameraCalibrationBusy;
+    applyCameraProfile.disabled=Boolean((s.recording||{}).active)||calibrationLocked||cameraCalibrationBusy||camera.reconfigurable===false||!['CAMERA_PREVIEW','RUNNING','REFERENCE_FAILED'].includes(s.state);
     const cal=s.calibration||{};
     calibrationState.textContent=String(cal.state||'IDLE').replaceAll('_',' ');
     calibrationState.className='value small '+(cal.valid?'ok':(cal.state==='FAILED'||cal.state==='INVALID'?'bad':''));
@@ -535,7 +591,7 @@ async function refresh(){
     const rec=s.recording||{};
     recording.textContent=rec.active?`RECORDING · ${Number(rec.elapsed_s||0).toFixed(1)} s · ${rec.frame_count||0} camera / ${rec.imu_sample_count||0} IMU samples`:'IDLE';
     recording.className='value small '+(rec.active?'rec':'');
-    startRecording.disabled=Boolean(rec.active)||calibrationBusy; stopRecording.disabled=!rec.active||Boolean(cal.active);
+    startRecording.disabled=Boolean(rec.active)||calibrationBusy||cameraCalibrationBusy; stopRecording.disabled=!rec.active||Boolean(cal.active);
     const recordingHref=(!rec.active&&rec.download_url)?rec.download_url:(rec.browse_url||'/exports/recordings/');
     recordingPath.href=recordingHref;
     recordingPath.setAttribute('aria-disabled',recordingHref?'false':'true');
@@ -543,8 +599,9 @@ async function refresh(){
     else recordingPath.textContent='Open video recordings: video_recordings';
     if(rec.error) recordingPath.textContent='Recorder error: '+rec.error;
   } catch(e) { runtime.textContent='UI connection error: '+e; }
+  scheduleDashboardFit();
 }
-setInterval(refresh,350); setInterval(refreshHistory,700); refresh(); refreshHistory(); resizeVideoShell();
+setInterval(refresh,350); setInterval(refreshHistory,700); refresh(); refreshHistory(); resizeVideoShell(); scheduleDashboardFit();
 </script>
 </body>
 </html>
@@ -695,6 +752,20 @@ def create_app(runtime: VisionRuntime) -> Any:
             return jsonify(runtime.update_camera_profile(str(payload.get("profile", ""))))
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
+        except RuntimeError as exc:
+            return jsonify({"error": str(exc)}), 409
+
+    @app.post("/api/reference/camera-calibration/start")
+    def camera_calibration_start() -> Any:
+        try:
+            return jsonify(runtime.start_camera_calibration())
+        except RuntimeError as exc:
+            return jsonify({"error": str(exc)}), 409
+
+    @app.post("/api/reference/camera-calibration/cancel")
+    def camera_calibration_cancel() -> Any:
+        try:
+            return jsonify(runtime.cancel_camera_calibration())
         except RuntimeError as exc:
             return jsonify({"error": str(exc)}), 409
 

@@ -9,6 +9,7 @@
 #define IMUCAL_I2C_BUS Wire1
 
 namespace {
+constexpr unsigned long BRIDGE_BAUD = 921600UL;
 constexpr uint32_t SAMPLE_PERIOD_US = 10000;  // 100 Hz
 constexpr uint8_t THIGH_IMU_ADDRESS = 0x6A;
 constexpr uint8_t SHANK_IMU_ADDRESS = 0x6B;
@@ -188,12 +189,18 @@ void captureIfDue() {
 }  // namespace
 
 void setup() {
-  Bridge.begin();
-  g_bridge_ready = true;
-  initializeImus();
+  g_bridge_ready = Bridge.begin(BRIDGE_BAUD);
+  if (!g_bridge_ready) {
+    return;
+  }
+
+  // Register RPC methods before touching Wire1/IMUs so Linux can always
+  // observe MCU status even if sensor initialization is slow or fails.
+  Bridge.provide_safe("vision_imu_status_flags", statusFlags);
   Bridge.provide_safe("vision_imu_start_capture", startCapture);
   Bridge.provide_safe("vision_imu_stop_capture", stopCapture);
-  Bridge.provide_safe("vision_imu_status_flags", statusFlags);
+
+  initializeImus();
 }
 
 void loop() {
