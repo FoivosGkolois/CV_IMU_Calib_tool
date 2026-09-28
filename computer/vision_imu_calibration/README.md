@@ -1,314 +1,97 @@
-# Vision–IMU Calibration — synchronized PC prototype
+# Vision–IMU Calibration — V2 tag-reference transition
 
-This tool records a common camera and raw dual-IMU calibration dataset without using the production exoskeleton telemetry path.
+This tool is migrating from learned human-pose estimation to a fixed two-tag geometric reference.
 
-```text
-USB webcam ───────────────────────────────┐
-                                          ├─> PC Vision–IMU tool
-UNO R4 + thigh/shank IMUs ── USB Serial ─┘
-```
-
-The PC runs MoveNet SinglePose Thunder, draws the live side-view leg overlay, receives raw IMU samples, runs a parity-tested Python mirror of the current STM32 `knee_angle.cpp`, and presents both angle timelines. A guided offline layer can replay the recorded raw IMU data and export comparative recommended filter settings after the static and dynamic tests.
-
-## Isolation from the production system
-
-This milestone does not change:
-
-- production STM32 firmware,
-- normal `TELEM` schema,
-- serial GUI parser,
-- motor or SimpleFOC path,
-- safety state flow,
-- assistance logic.
-
-The UNO R4 uses a dedicated standalone sketch located at:
+Current V2.1 measurement contract:
 
 ```text
-standalone_tools/vision_imu_calibration/arduino/
-└── uno_r4_dual_imu_stream/
-    └── uno_r4_dual_imu_stream.ino
+USB camera -> AprilTag detector
+Tag 0 -> thigh
+Tag 1 -> shank
 ```
 
-## IMU hardware contract
+The previous MoveNet model, landmark smoothing, confidence threshold, leg selection, and angle-smoothing controls are removed from the active calibration path.
 
-The standalone sketch mirrors the current master firmware sensor configuration:
+## Important V2.1 gate
 
-- thigh IMU: LSM6DSOX at `0x6A`,
-- shank IMU: LSM6DSOX at `0x6B`,
-- accelerometer: `104 Hz`, `±2 g`,
-- gyroscope: `104 Hz`, `±250 dps`,
-- acquisition stream: `100 Hz`,
-- serial: `921600 baud`.
+V2.1 detects the two required tags and records their detections, but it intentionally does **not** produce a scientific knee-angle reference yet. The knee-angle output stays invalid until the persistent calibrated 3-D reference setup is added in the next patch.
 
-For UNO R4 WiFi with the Modulino/Qwiic chain, the sketch uses `Wire1`. For sensors connected to the normal SDA/SCL pins, set `IMUCAL_USE_WIRE1` to `0` before compiling.
+This prevents an uncalibrated 2-D angle from silently becoming the new reference.
 
-## Windows setup
+## What remains unchanged
 
-From the project root:
+- camera auto-detection and camera profiles,
+- UNO Q Bridge / serial IMU acquisition,
+- raw IMU schema and 100 Hz acquisition contract,
+- host mirror of the STM32 knee-angle filter,
+- recorder ownership and export roots,
+- static -> dynamic calibration session ownership,
+- synchronized timelines and calibration run folders.
 
-```bat
-08_SETUP_VISION_IMU_PC.bat
-10_TEST_VISION_IMU_PC.bat
-```
+## Dependencies
 
-The isolated `.venv-vision` installs MoveNet/LiteRT, OpenCV, Flask, pytest, pyserial, PyYAML, and Matplotlib.
-
-## Fast webcam startup
-
-The default Windows camera profile is intentionally lightweight:
+PC:
 
 ```text
-640 × 480 @ 30 FPS
-auto backend order: DSHOW → MSMF → OpenCV default
+opencv-contrib-python
 ```
 
-MoveNet resizes its input to `256 × 256`, so starting the webcam at 1280 × 720
-does not materially improve pose inference but often increases USB camera negotiation time.
-The default camera selector is `auto`. The tool tests available camera indices and
-keeps the first source that returns a real frame. On Linux it prioritizes UVC/webcam
-nodes and de-prioritizes internal encoder/decoder devices. The active index and
-backend are shown in the runtime source field, for example `camera:2 [V4L2, MJPG]`.
-
-For a known camera/backend, startup can be made fully deterministic:
-
-```bat
-.venv-vision\Scripts\python.exe -m computer.vision_imu_calibration --camera 0 --camera-backend dshow
-```
-
-Fallback values are `msmf`, `v4l2`, `default`, and `auto`.
-
-## Vision-only run
-
-```bat
-09_RUN_VISION_IMU_PC.bat
-```
-
-## Synchronized camera + IMU run
-
-1. Upload this exact sketch to the UNO R4:
+UNO Q App Lab:
 
 ```text
-standalone_tools/vision_imu_calibration/arduino/
-uno_r4_dual_imu_stream/uno_r4_dual_imu_stream.ino
+opencv-contrib-python-headless
 ```
 
-2. Close Arduino Serial Monitor.
-3. Connect the webcam to the PC.
-4. Run:
+OpenCV contrib is required because the reference detector uses the built-in AprilTag dictionary support.
 
-```bat
-11_RUN_VISION_IMU_SYNC_PC.bat
-```
+## Required printed markers
 
-5. Open `http://127.0.0.1:8765`.
-6. In **UNO R4 raw IMU stream**, press **Refresh**, select the UNO R4 COM port, and press **Connect**.
-7. Wait until the UI shows:
-   - pose backend `RUNNING`,
-   - IMU serial `CONNECTED`,
-   - thigh and shank `READY`,
-   - current IMU estimator `VALID`.
-8. Select the camera-near leg explicitly.
-9. Press **Start recording**, remain still for five seconds, then perform five slow flexion–extension cycles.
-10. Press **Stop**.
+- Tag 0: THIGH
+- Tag 1: SHANK
+- Dictionary: AprilTag 36h11
 
-## Output contract
-
-Each completed session creates exactly one archive:
+Printable tag assets are included under:
 
 ```text
-video_recordings/vision_imu_session_<timestamp>.zip
+reference_setup/tags/
 ```
 
-The ZIP contains these files directly at its root:
+## Normal outputs
+
+Simple recorder:
 
 ```text
-annotated_pose.mp4              # or AVI fallback
-pose_timeline.csv               # visual landmarks and visual posterior knee angle
-raw_imu.csv                     # raw and unit-converted IMU measurements
-imu_estimator_timeline.csv      # current IMU filter output at IMU rate
-synchronized_timeline.csv       # camera rows paired to raw and processed IMU samples
-acquisition_summary.json        # descriptive coverage and synchronization evidence
-acquisition_overview.png        # visual and IMU angle presentation
-recording_metadata.json
+video_recordings/
 ```
 
-A temporary workspace is used only while recording and is removed after successful ZIP finalization. Raw and processed data remain in separate files. `host_monotonic_ns` is generated from `time.perf_counter_ns()` for both streams, while the MCU timestamp is retained for the native 100 Hz IMU timeline.
-
-## Calibration protocol
-
-The standalone sketch remains idle until the PC sends:
-
-```text
-CMD,<id>,START_CAPTURE
-```
-
-It replies with `ACK` and sends fixed-shape `IMUCAL` frames. On stop:
-
-```text
-CMD,<id>,STOP_CAPTURE
-```
-
-The detailed schema is documented in:
-
-```text
-standalone_tools/vision_imu_calibration/imu_calibration_protocol.md
-```
-
-## Live tuning
-
-The web panel controls only pose validation and display filtering around the fixed pretrained model:
-
-- fixed tracked leg,
-- frame rotation,
-- landmark confidence threshold,
-- landmark smoothing,
-- angle smoothing,
-- minimum visible segment,
-- maximum accepted angle jump.
-
-These values do not modify the neural-network weights. The calibration workflow uses the active pose-reference settings but never changes them automatically during a test.
-
-## Acceptance gate for this milestone
-
-A valid hardware trial should show:
-
-- IMU rate close to `100 Hz`,
-- both IMUs ready,
-- no parser errors,
-- no queue drops,
-- no unexplained sample-index gaps,
-- valid pose tracking above `90%` during the controlled movement,
-- synchronized camera rows with low and stable `sync_delta_ms`.
-
-This milestone includes the Python mirror of `knee_angle.cpp`, live/offline presentation, and the guided static/dynamic recommendation workflow.
-
-## Manual UNO R4 serial connection
-
-The calibration web page owns the standalone IMU serial connection:
-
-1. Upload `standalone_tools/vision_imu_calibration/arduino/uno_r4_dual_imu_stream/uno_r4_dual_imu_stream.ino`.
-2. Close Arduino Serial Monitor and any other program using the COM port.
-3. Start the calibration application with `11_RUN_VISION_IMU_SYNC_PC.bat`.
-4. In the **UNO R4 raw IMU stream** card, press **Refresh**, select the UNO R4 COM port, and press **Connect**.
-5. Wait for `CONNECTED`, `Thigh: READY`, and `Shank: READY` before recording.
-
-The COM connection can be changed only while the recorder is idle. This prevents a trial from mixing data from different serial sessions.
-
-## Camera quality profile
-
-The live page exposes two restartable camera profiles:
-
-- **Fast — 640×480:** faster initialization and lower CPU/USB load.
-- **Quality — 1280×720:** more source detail and potentially better tracking at difficult side-view angles.
-
-Stop recording before changing profile. The camera briefly restarts, while the MoveNet backend and the rest of the application remain loaded.
-
-
-## Current IMU estimator presentation
-
-After **Connect**, the UNO R4 stream runs continuously, even while the recorder is idle. The web page shows:
-
-- current IMU posterior knee angle,
-- current knee speed,
-- thigh and shank filtered orientations,
-- visual and IMU angle on a rolling 15 s plot,
-- the active standalone parameter source (`default_knee_filter.yaml`).
-
-The **Reload IMU filter config** button resets only the host-side estimator and reloads the standalone filter parameters. It does not write parameters to the Arduino.
-
-The host implementation is identified as `stm32_knee_angle_cpp_mirror_v1` and is checked against the current C++ implementation when a desktop C++ compiler is available.
-
-## Scope boundary
-
-The live runtime performs acquisition, deterministic filtering, synchronization, recording, and presentation. Parameter search runs only offline after both guided tests finish. It uses a limited deterministic grid, preserves the confirmed axis/sign conventions, and exports a recommendation YAML without writing anything to the Arduino or production firmware.
-
-## Standalone calibration-tool copy
-
-The acquisition/presentation tool can run outside the complete thesis repository.
-At startup it resolves the knee-angle filter configuration in this order:
-
-1. an explicit `--filter-config <path>` argument,
-2. `settings/current.yaml` when the complete thesis tree is present,
-3. the bundled `default_knee_filter.yaml` snapshot from `Thesis_master(40)`.
-
-The active path is printed in the console and stored with the acquisition metadata.
-The C++ parity test runs only when the STM32 source tree is available. Plot export uses
-the non-interactive Matplotlib `Agg` backend and does not require Tk/Tkinter.
-
-
-## Angle convention
-
-Both the visual estimator and the IMU estimator now use the same posterior-knee-angle convention:
-
-- **180°** = straight leg
-- **smaller angle** = more knee flexion
-
-The visual overlay also draws a live colored arc behind the knee.
-
-
-## Responsive live workspace
-
-The camera, metric cards, angle plot, and control cards automatically fit the available browser width. Their size is controlled by the responsive page layout rather than user drag handles, so the same GUI behaves deterministically across PCs and the UNO Q browser client.
-
-The live video overlay includes the compact tracking badge plus the thigh/shank bars, hip-knee-ankle markers, posterior knee-angle arc, and live angle value.
-
-## Guided two-stage calibration
-
-The web GUI treats calibration as one deterministic session with two consecutive stages. Both stages require the IMU stream to be connected, both IMUs to be ready, and visual tracking to be valid.
-
-### Stage 1 — static
-
-Press **Start calibration**, read the instructions, and start the five-second countdown. The tool records automatically for 12 seconds. Keep the complete hip–knee–ankle chain visible and keep the leg completely still at one comfortable angle.
-
-The static stage estimates the common knee-angle offset, thigh and shank gyro biases, and a practical gyro deadband. It writes the first section of the shared `imu_filter_suggestions.yaml` and leaves the session in `AWAITING_DYNAMIC`.
-
-### Stage 2 — dynamic
-
-Press **Continue to dynamic calibration**. After the five-second countdown, perform about five slow and smooth flexion–extension cycles. The tool records automatically for 25 seconds.
-
-The PC replays the recorded raw IMU data through a limited deterministic parameter grid. It compares the replayed IMU angle with the synchronized visual reference and completes the same YAML with the dynamic suggestion and final merged settings.
-
-The workflow preserves the confirmed axis mapping and sign conventions. It does not rewrite hardware orientation parameters automatically.
-
-### Deterministic output ownership
-
-The normal **Record Video** control owns only:
-
-```text
-video_recordings/vision_imu_session_<timestamp>.zip
-```
-
-Each calibration session owns one run directory:
+Calibration run:
 
 ```text
 calibration_suggestions/calibration_run_<timestamp>/
 ```
 
-The run contains:
+The visual/reference timeline inside each recording is now named:
 
 ```text
-static_trial.zip
-dynamic_trial.zip
-imu_filter_suggestions.yaml
-calibration_report.json
-calibration_overview.png
+reference_timeline.csv
 ```
 
-Both trial archives include their own video, raw IMU, processed IMU, synchronized timeline, metadata, and overview files. Static and dynamic never write to `video_recordings`, and the simple recorder never writes to `calibration_suggestions`.
-
-Paths shown in the GUI are project-relative and clickable through the web server, so no Windows-specific or UNO-Q-specific absolute path is exposed. The YAML is written atomically: after the static stage it contains the static suggestion and `awaiting_dynamic`; after the dynamic stage the same file contains the dynamic suggestion and final merged settings.
-
-If quality gates fail, the shared YAML records the invalid state and the failed gates rather than presenting an unvalidated final configuration.
-
-## UNO Q Phase 2 transport
-
-The runtime now supports two interchangeable IMU transports:
+and the annotated video is:
 
 ```text
-USB serial       --imu-transport serial --imu-port COMx
-UNO Q Bridge     --imu-transport uno-q-bridge
+annotated_reference.mp4
 ```
 
-`BridgeImuSource` preserves the existing `ImuCalibrationSample` contract, so pose processing, filtering, synchronization, recording, guided static/dynamic tests, and exported settings do not depend on the transport.
+(or AVI fallback).
 
-For UNO Q deployment, run `13_BUILD_UNO_Q_PHASE2_APP.bat` from the project root and open the generated App in Arduino App Lab.
+## Next V2 patch
+
+The next patch adds:
+
+1. one-time checkerboard camera calibration,
+2. persistent `reference_setup.yaml`,
+3. 3-D thigh/shank tag pose,
+4. relative knee-angle calculation,
+5. reference quality gates and persistence across normal UNO Q reboots.
+
+Only after that reference is valid should the scientific calibration workflow be enabled again.

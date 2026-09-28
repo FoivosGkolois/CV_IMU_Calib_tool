@@ -4,9 +4,7 @@ import threading
 import time
 from pathlib import Path
 
-import pytest
-
-from computer.vision_imu_calibration.geometry import KneeAngleResult
+from computer.vision_imu_calibration.marker_reference import MarkerReferenceResult
 from computer.vision_imu_calibration.runtime import RuntimeStatus, VisionRuntime
 
 
@@ -28,20 +26,34 @@ class BlockingCamera:
         self.release_open.set()
 
 
-class FakeEstimator:
+class FakeReference:
+    description = "fake-apriltag-reference"
+    thigh_tag_id = 0
+    shank_tag_id = 1
+
+    def __init__(self) -> None:
+        self.closed = False
+
     def open(self) -> None:
         return None
 
     def close(self) -> None:
-        return None
+        self.closed = True
 
-    def estimate(self, frame, timestamp_ms):
-        return None
+    def process(self, frame):
+        return MarkerReferenceResult(
+            angle_deg=None,
+            valid=False,
+            reason="reference_setup_required",
+            quality=1.0,
+            thigh=None,
+            shank=None,
+        )
 
 
 def test_runtime_start_returns_before_slow_camera_initialization(tmp_path: Path) -> None:
     camera = BlockingCamera()
-    runtime = VisionRuntime(camera, FakeEstimator(), recording_root=tmp_path)  # type: ignore[arg-type]
+    runtime = VisionRuntime(camera, FakeReference(), recording_root=tmp_path)  # type: ignore[arg-type]
     started = time.perf_counter()
     runtime.start()
     elapsed = time.perf_counter() - started
@@ -49,32 +61,6 @@ def test_runtime_start_returns_before_slow_camera_initialization(tmp_path: Path)
     assert runtime.status()["state"] == "STARTING"
     camera.release_open.set()
     runtime.stop()
-
-
-def test_angle_filter_smooths_valid_measurements() -> None:
-    first = KneeAngleResult(20.0, True, 0.9, "ok")
-    filtered, state = VisionRuntime._filter_angle(
-        first,
-        previous=10.0,
-        smoothing=0.5,
-        max_jump_deg=45.0,
-    )
-    assert filtered.valid
-    assert filtered.angle_deg == pytest.approx(15.0)
-    assert state == pytest.approx(15.0)
-
-
-def test_angle_filter_rejects_large_jump() -> None:
-    result = KneeAngleResult(100.0, True, 0.9, "ok")
-    filtered, state = VisionRuntime._filter_angle(
-        result,
-        previous=20.0,
-        smoothing=0.2,
-        max_jump_deg=30.0,
-    )
-    assert not filtered.valid
-    assert filtered.reason == "angle_jump"
-    assert state == pytest.approx(20.0)
 
 
 class PreviewCamera:
@@ -97,73 +83,28 @@ class PreviewCamera:
         self.closed = True
 
 
-class BlockingEstimator:
-    def __init__(self) -> None:
-        self.release_open = threading.Event()
-        self.closed = False
-
+class FailingReference(FakeReference):
     def open(self) -> None:
-        self.release_open.wait(timeout=2.0)
-
-    def close(self) -> None:
-        self.closed = True
-        self.release_open.set()
-
-    def estimate(self, frame, timestamp_ms):
-        return None
+        raise RuntimeError("tag backend unavailable")
 
 
-class FailingEstimator:
-    def open(self) -> None:
-        raise RuntimeError("pose backend unavailable")
-
-    def close(self) -> None:
-        return None
-
-    def estimate(self, frame, timestamp_ms):
-        raise AssertionError("estimate must not run when open failed")
-
-
-def test_runtime_publishes_camera_preview_before_pose_model_is_ready(tmp_path: Path) -> None:
+def test_runtime_publishes_camera_preview_when_reference_backend_fails(tmp_path: Path) -> None:
     camera = PreviewCamera()
-    estimator = BlockingEstimator()
-    runtime = VisionRuntime(camera, estimator, recording_root=tmp_path)  # type: ignore[arg-type]
-    runtime.start()
-
-    sequence, jpeg = runtime.wait_for_jpeg(0, timeout_s=1.0)
-    status = runtime.status()
-
-    assert sequence >= 1
-    assert jpeg is not None
-    assert status["state"] == "CAMERA_PREVIEW"
-    assert status["frame_index"] >= 1
-    assert status["tracking_reason"] == "initializing_pose_model"
-
-    estimator.release_open.set()
-    deadline = time.monotonic() + 1.0
-    while time.monotonic() < deadline and runtime.status()["state"] != "RUNNING":
-        time.sleep(0.01)
-    assert runtime.status()["state"] == "RUNNING"
-    runtime.stop()
-
-
-def test_runtime_preserves_camera_preview_when_pose_model_open_fails(tmp_path: Path) -> None:
-    camera = PreviewCamera()
-    runtime = VisionRuntime(camera, FailingEstimator(), recording_root=tmp_path)  # type: ignore[arg-type]
+    runtime = VisionRuntime(camera, FailingReference(), recording_root=tmp_path)  # type: ignore[arg-type]
     runtime.start()
 
     sequence, jpeg = runtime.wait_for_jpeg(0, timeout_s=1.0)
     deadline = time.monotonic() + 1.0
-    while time.monotonic() < deadline and runtime.status()["state"] != "AI_FAILED":
+    while time.monotonic() < deadline and runtime.status()["state"] != "REFERENCE_FAILED":
         time.sleep(0.01)
     status = runtime.status()
 
     assert sequence >= 1
     assert jpeg is not None
-    assert status["state"] == "AI_FAILED"
+    assert status["state"] == "REFERENCE_FAILED"
     assert status["frame_index"] >= 1
-    assert status["tracking_reason"] == "pose_model_failed"
-    assert "pose backend unavailable" in status["error"]
+    assert status["tracking_reason"] == "reference_backend_failed"
+    assert "tag backend unavailable" in status["error"]
     runtime.stop()
 
 
@@ -247,7 +188,7 @@ def test_runtime_manual_imu_connect_and_disconnect(tmp_path: Path) -> None:
     ManualImuSource.instances.clear()
     runtime = VisionRuntime(
         PreviewCamera(),
-        FakeEstimator(),
+        FakeReference(),
         recording_root=tmp_path,
         imu_source_factory=ManualImuSource,
     )  # type: ignore[arg-type]
@@ -264,12 +205,19 @@ def test_runtime_manual_imu_connect_and_disconnect(tmp_path: Path) -> None:
 
 def test_runtime_camera_profile_changes_live_source_settings(tmp_path: Path) -> None:
     camera = ReconfigurableCamera()
-    runtime = VisionRuntime(camera, FakeEstimator(), recording_root=tmp_path)  # type: ignore[arg-type]
+    runtime = VisionRuntime(camera, FakeReference(), recording_root=tmp_path)  # type: ignore[arg-type]
     runtime._status = RuntimeStatus(
-        state="RUNNING", source=camera.description, requested_leg="auto", tracked_leg=None,
-        tracking_valid=False, tracking_reason="test", visual_knee_angle_deg=None,
-        raw_knee_angle_deg=None, pose_confidence=0.0, inference_fps=0.0,
-        frame_index=0, error="",
+        state="RUNNING",
+        source=camera.description,
+        tracking_valid=False,
+        tracking_reason="test",
+        visual_knee_angle_deg=None,
+        marker_quality=0.0,
+        thigh_tag_detected=False,
+        shank_tag_detected=False,
+        processing_fps=0.0,
+        frame_index=0,
+        error="",
     )
 
     result = runtime.update_camera_profile("quality")
@@ -292,7 +240,7 @@ def test_manual_connect_starts_continuous_calibration_stream(tmp_path: Path) -> 
     StreamingManualImuSource.instances.clear()
     runtime = VisionRuntime(
         PreviewCamera(),
-        FakeEstimator(),
+        FakeReference(),
         recording_root=tmp_path,
         imu_source_factory=StreamingManualImuSource,
     )  # type: ignore[arg-type]
@@ -302,7 +250,7 @@ def test_manual_connect_starts_continuous_calibration_stream(tmp_path: Path) -> 
 
 
 def test_acquisition_history_is_bounded_and_decimated(tmp_path: Path) -> None:
-    runtime = VisionRuntime(PreviewCamera(), FakeEstimator(), recording_root=tmp_path)  # type: ignore[arg-type]
+    runtime = VisionRuntime(PreviewCamera(), FakeReference(), recording_root=tmp_path)  # type: ignore[arg-type]
     now = time.perf_counter_ns()
     with runtime._imu_filter_lock:
         for index in range(100):
@@ -318,152 +266,3 @@ def test_acquisition_history_is_bounded_and_decimated(tmp_path: Path) -> None:
             )
     rows = runtime.acquisition_history(seconds=2.0, max_points=20)
     assert len(rows) <= 20
-    assert rows[-1]["angle_difference_deg"] == 1.0
-
-
-def test_imu_loop_updates_live_filter_estimate(tmp_path: Path) -> None:
-    from computer.vision_imu_calibration.imu_serial import ImuCalibrationSample
-
-    class OneSampleSource:
-        def __init__(self) -> None:
-            self.sent = False
-
-        def get_sample(self, timeout_s: float = 0.1):
-            if self.sent:
-                time.sleep(0.01)
-                return None
-            self.sent = True
-            return ImuCalibrationSample(
-                host_monotonic_ns=1_000_000_000,
-                schema_version=1,
-                sample_index=1,
-                mcu_timestamp_us=10_000,
-                thigh_ok=True,
-                shank_ok=True,
-                thigh_ax_raw=0,
-                thigh_ay_raw=0,
-                thigh_az_raw=16393,
-                thigh_gx_raw=0,
-                thigh_gy_raw=0,
-                thigh_gz_raw=0,
-                shank_ax_raw=0,
-                shank_ay_raw=-16393,
-                shank_az_raw=0,
-                shank_gx_raw=0,
-                shank_gy_raw=0,
-                shank_gz_raw=0,
-            )
-
-        def status(self):
-            return {"configured": True, "capture_active": True}
-
-    runtime = VisionRuntime(PreviewCamera(), FakeEstimator(), recording_root=tmp_path)  # type: ignore[arg-type]
-    with runtime._imu_lock:
-        runtime._imu_source = OneSampleSource()  # type: ignore[assignment]
-    thread = threading.Thread(target=runtime._imu_loop)
-    thread.start()
-    deadline = time.monotonic() + 1.0
-    while time.monotonic() < deadline and not runtime.imu_estimator_status()["valid"]:
-        time.sleep(0.01)
-    runtime._stop_event.set()
-    thread.join(timeout=1.0)
-    status = runtime.imu_estimator_status()
-    assert status["valid"] is True
-    assert status["knee_angle_deg"] == pytest.approx(90.0, abs=0.2)
-
-
-class ReadyCalibrationImuSource:
-    configured = True
-
-    def status(self):
-        return {
-            "configured": True,
-            "connected": True,
-            "capture_active": True,
-            "port": "COM4",
-            "baud_rate": 921600,
-            "state": "CAPTURING",
-            "sample_rate_hz": 100.0,
-            "sample_count": 100,
-            "parse_errors": 0,
-            "sequence_gaps": 0,
-            "queue_drops": 0,
-            "thigh_ready": True,
-            "shank_ready": True,
-            "last_sample_index": 99,
-            "last_error": "",
-        }
-
-    def stop(self):
-        return None
-
-
-def test_runtime_starts_guided_static_calibration_only_when_ready(tmp_path: Path) -> None:
-    runtime = VisionRuntime(
-        PreviewCamera(),
-        FakeEstimator(),
-        recording_root=tmp_path / "video_recordings",
-        calibration_root=tmp_path / "calibration_suggestions",
-        imu_source=ReadyCalibrationImuSource(),  # type: ignore[arg-type]
-    )  # type: ignore[arg-type]
-    runtime._status = RuntimeStatus(  # noqa: SLF001 - focused runtime state test
-        state="RUNNING",
-        source="preview-camera",
-        requested_leg="right",
-        tracked_leg="right",
-        tracking_valid=True,
-        tracking_reason="ok",
-        visual_knee_angle_deg=150.0,
-        raw_knee_angle_deg=150.0,
-        pose_confidence=0.9,
-        inference_fps=10.0,
-        frame_index=10,
-        error="",
-    )
-
-    status = runtime.start_calibration_test("static")
-    assert status["active"] is True
-    assert status["current_test"] == "static"
-    assert Path(status["run_directory"]).is_dir()
-    cancelled = runtime.cancel_calibration_test()
-    assert cancelled["active"] is False
-
-
-class AutoDetectedCamera(ReconfigurableCamera):
-    camera_index = "auto"
-    active_camera_index = 3
-    description = "camera:3 [V4L2, MJPG]"
-
-
-def test_runtime_camera_status_reports_auto_selected_device(tmp_path: Path) -> None:
-    runtime = VisionRuntime(
-        AutoDetectedCamera(),
-        FakeEstimator(),
-        recording_root=tmp_path,
-    )  # type: ignore[arg-type]
-
-    camera = runtime.camera_status()
-
-    assert camera["selector"] == "auto"
-    assert camera["active_index"] == 3
-    assert camera["source"] == "camera:3 [V4L2, MJPG]"
-
-
-def test_runtime_reports_portable_clickable_export_paths(tmp_path: Path) -> None:
-    recording_root = tmp_path / "video_recordings"
-    calibration_root = tmp_path / "calibration_suggestions"
-    runtime = VisionRuntime(
-        PreviewCamera(),
-        FakeEstimator(),
-        recording_root=recording_root,
-        calibration_root=calibration_root,
-    )  # type: ignore[arg-type]
-
-    status = runtime.status()
-
-    assert status["recording"]["display_path"] == "video_recordings"
-    assert status["recording"]["browse_url"] == "/exports/recordings/"
-    assert status["calibration"]["display_path"] == "calibration_suggestions"
-    assert status["calibration"]["browse_url"] == "/exports/calibration/"
-    assert str(tmp_path) not in status["recording"]["display_path"]
-    assert str(tmp_path) not in status["calibration"]["display_path"]

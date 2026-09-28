@@ -8,7 +8,6 @@ import webbrowser
 from pathlib import Path
 
 from .camera_source import OpenCvCameraSource
-from .download_model import DEFAULT_TARGET, download_model
 from .imu_filter import (
     KneeAngleFilterMirror,
     KneeAngleFilterParameters,
@@ -16,8 +15,7 @@ from .imu_filter import (
 )
 from .imu_bridge import BridgeImuSource
 from .imu_serial import IMUCAL_BAUD_RATE, SerialImuSource
-from .models import LegSide
-from .pose_estimator import MoveNetThunderPoseEstimator
+from .marker_reference import AprilTagReference
 from .runtime import VisionRuntime
 from .web_app import create_app
 
@@ -25,7 +23,6 @@ from .web_app import create_app
 def resolve_project_root() -> Path:
     """Return the portable CV_IMU_Calib_tool root from the packaged source location."""
     return Path(__file__).resolve().parents[2]
-
 
 
 def _parse_camera_selector(value: str) -> int | str:
@@ -42,7 +39,7 @@ def _parse_camera_selector(value: str) -> int | str:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="PC-first Vision–IMU pose visualizer")
+    parser = argparse.ArgumentParser(description="Vision–IMU AprilTag reference calibration tool")
     source = parser.add_mutually_exclusive_group()
     source.add_argument(
         "--camera",
@@ -51,15 +48,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="OpenCV camera index or auto-detect (default: auto)",
     )
     source.add_argument("--video", type=Path, help="Replay a video file instead of using a webcam")
-    parser.add_argument("--leg", choices=[side.value for side in LegSide], default=LegSide.RIGHT.value)
-    parser.add_argument("--model", type=Path, default=DEFAULT_TARGET)
-    parser.add_argument("--confidence", type=float, default=0.30)
-    parser.add_argument("--inference-threads", type=int, default=4)
-    parser.add_argument(
-        "--no-smart-crop",
-        action="store_true",
-        help="Disable MoveNet video crop tracking and process the full padded frame every time",
-    )
     parser.add_argument("--width", type=int, default=640)
     parser.add_argument("--height", type=int, default=480)
     parser.add_argument(
@@ -69,7 +57,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Camera backend. Auto selects DSHOW/MSMF on Windows and V4L2 on Linux.",
     )
     parser.add_argument("--fps", type=float, default=30.0)
-    parser.add_argument("--no-mirror", action="store_true")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--no-browser", action="store_true")
@@ -79,7 +66,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="auto",
         help=(
             "IMU source. auto preserves the PC workflow: serial when --imu-port is set, "
-            "otherwise manual GUI connection. uno-q-bridge is for Phase 2 on UNO Q Linux."
+            "otherwise manual GUI connection. uno-q-bridge is for UNO Q Linux."
         ),
     )
     parser.add_argument("--imu-port", help="Calibration serial port, e.g. COM3")
@@ -91,7 +78,7 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Optional runtime YAML containing stm32_control.knee_angle parameters. "
             "Without this option, settings/current.yaml is preferred and the bundled "
-            "Thesis_master(40) snapshot is used in a standalone tool folder."
+            "snapshot is used in a standalone tool folder."
         ),
     )
     return parser
@@ -104,9 +91,6 @@ def main(argv: list[str] | None = None) -> int:
             f"Current interpreter: {sys.version.split()[0]}"
         )
     args = build_parser().parse_args(argv)
-    model_path = args.model.expanduser().resolve()
-    if not model_path.is_file():
-        download_model(model_path)
 
     camera = OpenCvCameraSource(
         camera_index=None if args.video is not None else args.camera,
@@ -114,14 +98,12 @@ def main(argv: list[str] | None = None) -> int:
         width=args.width,
         height=args.height,
         fps=args.fps,
-        mirror=not args.no_mirror,
+        # Fiducial detection must use the true, unmirrored camera geometry.
+        mirror=False,
         backend=args.camera_backend,
     )
-    estimator = MoveNetThunderPoseEstimator(
-        model_path,
-        num_threads=args.inference_threads,
-        smart_crop=not args.no_smart_crop,
-    )
+    reference = AprilTagReference()
+
     imu_transport = args.imu_transport
     if imu_transport == "auto":
         imu_transport = "serial" if args.imu_port else "none"
@@ -135,17 +117,17 @@ def main(argv: list[str] | None = None) -> int:
         imu_source = BridgeImuSource()
     else:
         imu_source = None
+
     filter_config_path = resolve_filter_config_path(args.filter_config)
     filter_parameters = KneeAngleFilterParameters.load_yaml(filter_config_path)
     imu_filter = KneeAngleFilterMirror(filter_parameters)
     project_root = resolve_project_root()
     recording_root = project_root / "video_recordings"
     calibration_root = project_root / "calibration_suggestions"
+
     runtime = VisionRuntime(
         camera,
-        estimator,
-        leg_side=LegSide(args.leg),
-        confidence_threshold=args.confidence,
+        reference,
         recording_root=recording_root,
         calibration_root=calibration_root,
         imu_source=imu_source,
@@ -156,8 +138,8 @@ def main(argv: list[str] | None = None) -> int:
     app = create_app(runtime)
     url_host = "127.0.0.1" if args.host in {"0.0.0.0", "::"} else args.host
     url = f"http://{url_host}:{args.port}"
-    print(f"Vision–IMU calibration prototype: {url}")
-    print(f"Pose backend: {estimator.description}")
+    print(f"Vision–IMU tag calibration tool: {url}")
+    print(f"Reference backend: {reference.description}")
     if imu_transport == "uno-q-bridge":
         imu_description = "UNO Q Arduino Bridge"
     elif imu_transport == "serial":

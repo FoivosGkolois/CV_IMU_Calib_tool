@@ -1,5 +1,5 @@
 name: Vision IMU Calibration Phase 2
-description: Runs MoveNet, the web GUI, recording, and calibration on UNO Q Linux while the MCU streams two IMUs through Arduino Bridge.
+description: Runs the AprilTag reference, web GUI, recording, and calibration on UNO Q Linux while the MCU streams two IMUs through Arduino Bridge.
 ports:
   - 8765
 bricks: []

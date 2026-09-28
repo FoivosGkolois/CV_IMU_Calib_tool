@@ -21,13 +21,12 @@ echo Running Vision-IMU targeted tests...
 echo.
 
 "%VISION_PYTHON%" -m pytest ^
-    "computer\tests\test_vision_imu_geometry.py" ^
+    "computer\tests\test_vision_imu_marker_reference.py" ^
     "computer\tests\test_vision_imu_camera_source.py" ^
     "computer\tests\test_vision_imu_tuning.py" ^
-    "computer\tests\test_vision_imu_landmark_filter.py" ^
     "computer\tests\test_vision_imu_runtime.py" ^
+    "computer\tests\test_vision_imu_overlay.py" ^
     "computer\tests\test_vision_imu_recorder.py" ^
-    "computer\tests\test_vision_imu_movenet.py" ^
     "computer\tests\test_vision_imu_serial_protocol.py" ^
     "computer\tests\test_vision_imu_filter.py" ^
     "computer\tests\test_vision_imu_filter_cpp_parity.py" ^

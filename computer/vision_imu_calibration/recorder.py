@@ -42,23 +42,21 @@ class RecordingStatus:
 class AnnotatedVideoRecorder:
     """Record separate raw, processed, visual, and synchronized timelines."""
 
-    POSE_FIELDS = [
+    REFERENCE_FIELDS = [
         "recording_time_s",
         "host_monotonic_ns",
         "frame_index",
         "visual_knee_angle_deg",
-        "raw_knee_angle_deg",
-        "pose_confidence",
         "tracking_valid",
         "tracking_reason",
-        "tracked_leg",
-        "inference_fps",
-        "hip_x",
-        "hip_y",
-        "knee_x",
-        "knee_y",
-        "ankle_x",
-        "ankle_y",
+        "marker_quality",
+        "thigh_tag_detected",
+        "shank_tag_detected",
+        "thigh_tag_center_x",
+        "thigh_tag_center_y",
+        "shank_tag_center_x",
+        "shank_tag_center_y",
+        "processing_fps",
         "live_imu_filter_valid",
         "live_imu_knee_angle_deg",
         "live_imu_knee_speed_deg_s",
@@ -218,7 +216,7 @@ class AnnotatedVideoRecorder:
                 self._write_video_until_locked(elapsed, self._last_frame)
                 self._frame_count += 1
                 if self._csv_writer is not None:
-                    row = {field: sample.get(field) for field in self.POSE_FIELDS}
+                    row = {field: sample.get(field) for field in self.REFERENCE_FIELDS}
                     row["recording_time_s"] = elapsed
                     row["host_monotonic_ns"] = host_ns
                     row["frame_index"] = sample.get("frame_index", self._frame_count)
@@ -323,7 +321,7 @@ class AnnotatedVideoRecorder:
         self._archive_path = archive_path
         self._archive_finalized = False
         self._session_dir = session_dir
-        self._csv_path = session_dir / "pose_timeline.csv"
+        self._csv_path = session_dir / "reference_timeline.csv"
         self._imu_csv_path = session_dir / "raw_imu.csv"
         self._estimator_csv_path = session_dir / "imu_estimator_timeline.csv"
         self._synchronized_csv_path = session_dir / "synchronized_timeline.csv"
@@ -332,7 +330,7 @@ class AnnotatedVideoRecorder:
         self._metadata_path = session_dir / "recording_metadata.json"
 
         self._csv_file = self._csv_path.open("w", newline="", encoding="utf-8")
-        self._csv_writer = csv.DictWriter(self._csv_file, fieldnames=self.POSE_FIELDS)
+        self._csv_writer = csv.DictWriter(self._csv_file, fieldnames=self.REFERENCE_FIELDS)
         self._csv_writer.writeheader()
         self._imu_csv_file = self._imu_csv_path.open("w", newline="", encoding="utf-8")
         self._imu_csv_writer = csv.DictWriter(self._imu_csv_file, fieldnames=self.IMU_FIELDS)
@@ -369,13 +367,13 @@ class AnnotatedVideoRecorder:
         cv2 = _load_cv2()
         height, width = frame.shape[:2]
         fps = min(30.0, max(5.0, round(float(preferred_fps or 15.0), 1)))
-        mp4_path = self._session_dir / "annotated_pose.mp4"
+        mp4_path = self._session_dir / "annotated_reference.mp4"
         writer = cv2.VideoWriter(
             str(mp4_path), cv2.VideoWriter_fourcc(*"mp4v"), fps, (int(width), int(height))
         )
         if not writer.isOpened():
             writer.release()
-            avi_path = self._session_dir / "annotated_pose.avi"
+            avi_path = self._session_dir / "annotated_reference.avi"
             writer = cv2.VideoWriter(
                 str(avi_path), cv2.VideoWriter_fourcc(*"MJPG"), fps, (int(width), int(height))
             )

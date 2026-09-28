@@ -10,24 +10,23 @@ if not exist "%VISION_PYTHON%" (
     goto :failed
 )
 
-echo Starting Vision-IMU MoveNet Thunder prototype...
-echo Camera index: 0
-echo Camera mode: 640x480 at 30 FPS, fast Windows backend selection
+echo Starting Vision-IMU AprilTag reference prototype...
+echo Camera index: auto
+echo Camera mode: 640x480 at 30 FPS
+echo Required tags: Tag 0 THIGH, Tag 1 SHANK
 echo URL: http://127.0.0.1:8765
-echo After the page opens, select the camera-near leg explicitly.
 echo Stop the application with Ctrl+C.
 echo.
 
-"%VISION_PYTHON%" -m computer.vision_imu_calibration --camera 0 --camera-backend auto --width 640 --height 480 --leg auto --inference-threads 4
+"%VISION_PYTHON%" -m computer.vision_imu_calibration --camera auto --camera-backend auto --width 640 --height 480
 set "APP_EXIT_CODE=%ERRORLEVEL%"
 
 echo.
 if not "%APP_EXIT_CODE%"=="0" (
     echo The application stopped with exit code %APP_EXIT_CODE%.
     echo Read the error above. Common causes are:
-    echo - 08_SETUP was not rerun after the MoveNet patch,
-    echo - the model download failed,
-    echo - camera 0 is unavailable,
+    echo - 08_SETUP was not rerun after the tag-reference patch,
+    echo - the camera is unavailable,
     echo - another program is using the webcam,
     echo - port 8765 is already in use.
 ) else (

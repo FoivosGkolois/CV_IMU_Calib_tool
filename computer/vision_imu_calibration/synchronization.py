@@ -7,7 +7,7 @@ from typing import Any
 
 
 def build_synchronized_timeline(
-    pose_csv_path: str | Path,
+    reference_csv_path: str | Path,
     imu_csv_path: str | Path,
     output_csv_path: str | Path,
     *,
@@ -15,22 +15,22 @@ def build_synchronized_timeline(
 ) -> int:
     """Pair each camera sample with nearest raw-IMU and estimator samples in host time."""
 
-    pose_path = Path(pose_csv_path)
+    reference_path = Path(reference_csv_path)
     imu_path = Path(imu_csv_path)
     estimator_path = Path(estimator_csv_path) if estimator_csv_path is not None else None
     output_path = Path(output_csv_path)
-    if not pose_path.is_file() or not imu_path.is_file():
+    if not reference_path.is_file() or not imu_path.is_file():
         return 0
 
-    poses = _read_rows(pose_path)
+    references = _read_rows(reference_path)
     imu_rows = _read_rows(imu_path)
     estimator_rows = _read_rows(estimator_path) if estimator_path and estimator_path.is_file() else []
-    if not poses or not imu_rows:
+    if not references or not imu_rows:
         return 0
 
     imu_times = [int(row["host_monotonic_ns"]) for row in imu_rows]
     estimator_times = [int(row["host_monotonic_ns"]) for row in estimator_rows]
-    fieldnames = list(poses[0].keys()) + [
+    fieldnames = list(references[0].keys()) + [
         "sync_delta_ms",
         *[f"imu_{key}" for key in imu_rows[0].keys()],
     ]
@@ -47,22 +47,22 @@ def build_synchronized_timeline(
     with output_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
-        for pose in poses:
-            pose_time = int(pose["host_monotonic_ns"])
-            imu_index = _nearest_index(imu_times, pose_time)
+        for reference in references:
+            reference_time = int(reference["host_monotonic_ns"])
+            imu_index = _nearest_index(imu_times, reference_time)
             if imu_index is None:
                 continue
             imu = imu_rows[imu_index]
-            merged: dict[str, Any] = dict(pose)
-            merged["sync_delta_ms"] = (imu_times[imu_index] - pose_time) / 1_000_000.0
+            merged: dict[str, Any] = dict(reference)
+            merged["sync_delta_ms"] = (imu_times[imu_index] - reference_time) / 1_000_000.0
             merged.update({f"imu_{key}": value for key, value in imu.items()})
 
             if estimator_rows:
-                estimator_index = _nearest_index(estimator_times, pose_time)
+                estimator_index = _nearest_index(estimator_times, reference_time)
                 if estimator_index is not None:
                     estimator = estimator_rows[estimator_index]
                     merged["estimator_sync_delta_ms"] = (
-                        estimator_times[estimator_index] - pose_time
+                        estimator_times[estimator_index] - reference_time
                     ) / 1_000_000.0
                     merged.update(
                         {f"estimator_{key}": value for key, value in estimator.items()}

@@ -25,24 +25,21 @@ if not exist ".venv-vision\Scripts\python.exe" (
 call ".venv-vision\Scripts\activate.bat"
 if errorlevel 1 goto :failed
 
-echo Updating isolated MoveNet vision environment...
+echo Updating isolated AprilTag vision environment...
 python -m pip install --upgrade pip
 if errorlevel 1 goto :failed
 
 python -m pip install --upgrade -r "computer\vision_imu_calibration\requirements.txt"
 if errorlevel 1 goto :failed
 
-python -m computer.vision_imu_calibration.download_model
-if errorlevel 1 goto :failed
-
-python -c "from ai_edge_litert.interpreter import Interpreter; print('LiteRT interpreter: OK')"
+python -c "import cv2; assert hasattr(cv2,'aruco'); assert hasattr(cv2.aruco,'DICT_APRILTAG_36h11'); print('OpenCV AprilTag support: OK')"
 if errorlevel 1 goto :failed
 
 python -c "import serial; from serial.tools import list_ports; print('pyserial: OK')"
 if errorlevel 1 goto :failed
 
 echo.
-echo MoveNet Thunder vision environment is ready.
+echo AprilTag reference environment is ready.
 echo Next command: 10_TEST_VISION_IMU_PC.bat
 echo.
 pause

@@ -20,7 +20,7 @@ Use it with:
 
 ## UNO Q migration — Phase 1
 
-Phase 1 moves only the deterministic dual-IMU acquisition sketch to the UNO Q STM32U585 MCU. Python, MoveNet, the web GUI, synchronization, recording, and calibration still run on the Windows PC.
+Phase 1 moves only the deterministic dual-IMU acquisition sketch to the UNO Q STM32U585 MCU. Python, the tag-reference pipeline, the web GUI, synchronization, recording, and calibration still run on the Windows PC.
 
 Upload with Arduino IDE 2:
 
@@ -75,7 +75,7 @@ Phase 2 moves the full host application onto the UNO Q Linux processor:
 ```text
 UNO Q MCU   -> reads both IMUs at 100 Hz
 Arduino Bridge -> transfers the same raw sample contract internally
-UNO Q Linux -> MoveNet, filtering, synchronization, GUI, recording, and calibration
+UNO Q Linux -> AprilTag reference, filtering, synchronization, GUI, recording, and calibration
 PC browser  -> only displays and controls the web GUI over Wi-Fi/Ethernet
 ```
 
@@ -96,7 +96,7 @@ uno_q_phase2_app_ready.zip
 Open/import the generated App in Arduino App Lab. The App contains:
 
 - the Phase 2 MCU Bridge sketch,
-- the current Python package and MoveNet model,
+- the current Python package and AprilTag/OpenCV reference backend,
 - Python dependencies,
 - the web port definition for port 8765.
 

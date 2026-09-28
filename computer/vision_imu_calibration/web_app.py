@@ -114,14 +114,14 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
 </section>
 <section class="live-column">
   <div class="live-summary">
-    <div class="summary-card"><div class="label">Tracking</div><div id="tracking" class="value">Starting…</div><div id="reason" class="small">Initializing camera and pose model</div></div>
-    <div class="summary-card"><div class="label">Visual angle</div><div id="angle" class="value">--.-°</div><div id="rawAngle" class="small">Raw: --.-°</div></div>
+    <div class="summary-card"><div class="label">Tag reference</div><div id="tracking" class="value">Starting…</div><div id="reason" class="small">Initializing camera and tag detector</div></div>
+    <div class="summary-card"><div class="label">Reference angle</div><div id="angle" class="value">--.-°</div><div id="referenceNote" class="small">3-D setup required</div></div>
     <div class="summary-card"><div class="label">IMU angle</div><div id="imuAngle" class="value">--.-°</div><div id="imuEstimatorState" class="small">NO SAMPLE</div></div>
-    <div class="summary-card"><div class="label">Pose quality</div><div id="confidence" class="value">0.00</div><div id="fps" class="small">0.0 FPS</div></div>
+    <div class="summary-card"><div class="label">Tags</div><div id="tagStatus" class="value">0 / 2</div><div id="fps" class="small">0.0 FPS</div></div>
   </div>
   <div class="chart-card">
     <div class="label">Live posterior knee-angle presentation · last 15 s</div>
-    <div class="note">Blue: visual reference · Green: IMU estimate. Live display only; calibration scoring runs offline after both stages.</div>
+    <div class="note">Blue: marker reference · Green: IMU estimate. Live display only; calibration scoring runs offline after both stages.</div>
     <div class="chart-shell"><canvas id="angleChart"></canvas></div>
   </div>
   <div class="recommendation-card card">
@@ -187,33 +187,17 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
     <div id="imuFilterInfo" class="note">Waiting for synchronized raw IMU samples.</div>
   </details>
 
-  <details class="card wide">
-    <summary><span class="label">Pose-reference tuning</span></summary>
-    <div class="controls">
-      <div class="control-row">
-        <div class="control-head"><span>Tracked leg</span></div>
-        <select id="legSide"><option value="auto">Auto</option><option value="left">Left</option><option value="right">Right</option></select>
-        <div class="control-help"><b>Auto:</b> highest-confidence leg. <b>Left/Right:</b> locks the corrected user-facing side.</div>
-      </div>
-      <div class="control-row">
-        <div class="control-head"><span>Frame rotation</span></div>
-        <select id="frameRotation"><option value="counterclockwise_90" selected>90° counter-clockwise</option><option value="none">0°</option><option value="clockwise_90">90° clockwise</option><option value="rotate_180">180°</option></select>
-        <div class="control-help">Default for the current portrait camera mounting.</div>
-      </div>
-      <div class="control-row"><div class="control-head"><span>Acceptance confidence</span><span id="confidenceThresholdValue">0.30</span></div><input id="confidenceThreshold" type="range" min="0.05" max="0.99" step="0.01"><div class="control-help">Higher values reject uncertain frames more aggressively.</div></div>
-      <div class="control-row"><div class="control-head"><span>Landmark smoothing</span><span id="landmarkSmoothingValue">0.55</span></div><input id="landmarkSmoothing" type="range" min="0" max="0.95" step="0.01"><div class="control-help">More smoothing reduces jitter but adds lag.</div></div>
-      <div class="control-row"><div class="control-head"><span>Angle smoothing</span><span id="angleSmoothingValue">0.35</span></div><input id="angleSmoothing" type="range" min="0" max="0.95" step="0.01"><div class="control-help">More smoothing stabilizes the angle but slows response.</div></div>
-      <div class="control-row"><div class="control-head"><span>Minimum visible segment</span><span id="segmentLengthValue">0.025</span></div><input id="segmentLength" type="range" min="0.005" max="0.20" step="0.005"><div class="control-help">Rejects implausibly short thigh/shank projections.</div></div>
-      <div class="control-row"><div class="control-head"><span>Maximum angle jump</span><span id="angleJumpValue">45°</span></div><input id="angleJump" type="range" min="5" max="180" step="1"><div class="control-help">Lower values reject spikes more aggressively.</div></div>
-    </div>
-    <button class="primary" style="margin-top:10px" onclick="applyTuning()">Apply tuning</button>
-    <div id="tuningMessage" class="note">Application-level filtering only; model weights are unchanged.</div>
+  <details class="card wide" open>
+    <summary><span class="label">Tag reference</span></summary>
+    <div id="thighTagState" class="note">Thigh · Tag 0: NOT DETECTED</div>
+    <div id="shankTagState" class="note">Shank · Tag 1: NOT DETECTED</div>
+    <div class="note">The old pose model and its tuning sliders are removed. V2.1 detects the two fixed tags only. The calibrated 3-D knee angle is intentionally locked until the persistent reference setup is added.</div>
   </details>
 
   <details class="card wide">
     <summary><span class="label">Runtime diagnostics</span></summary>
     <div id="runtime" class="value small">STARTING</div>
-    <div id="backend" class="note">Backend: MoveNet Thunder</div>
+    <div id="backend" class="note">Backend: AprilTag 36h11</div>
     <div id="source" class="note">Source: —</div>
     <div id="frameCount" class="note">Frames: 0</div>
   </details>
@@ -231,30 +215,14 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
     </div>
   </div>
 </div>
-<footer>Live acquisition plus one deterministic calibration run with static and dynamic stages. Recommendations are comparative, data-driven settings based on the synchronized visual reference.</footer>
+<footer>Live acquisition with a fixed two-tag geometric reference. Calibration remains locked until the persistent 3-D reference setup is completed.</footer>
 <script>
-const ids = {
-  confidence_threshold:'confidenceThreshold', landmark_smoothing:'landmarkSmoothing',
-  angle_smoothing:'angleSmoothing', min_segment_length:'segmentLength',
-  max_angle_jump_deg:'angleJump', leg_side:'legSide', frame_rotation:'frameRotation'
-};
-const confidenceThreshold=document.getElementById('confidenceThreshold');
-const landmarkSmoothing=document.getElementById('landmarkSmoothing');
-const angleSmoothing=document.getElementById('angleSmoothing');
-const segmentLength=document.getElementById('segmentLength');
-const angleJump=document.getElementById('angleJump');
-const legSide=document.getElementById('legSide');
-const frameRotation=document.getElementById('frameRotation');
-const confidenceThresholdValue=document.getElementById('confidenceThresholdValue');
-const landmarkSmoothingValue=document.getElementById('landmarkSmoothingValue');
-const angleSmoothingValue=document.getElementById('angleSmoothingValue');
-const segmentLengthValue=document.getElementById('segmentLengthValue');
-const angleJumpValue=document.getElementById('angleJumpValue');
-const tuningMessage=document.getElementById('tuningMessage');
 const reason=document.getElementById('reason');
 const angle=document.getElementById('angle');
-const rawAngle=document.getElementById('rawAngle');
-const confidence=document.getElementById('confidence');
+const referenceNote=document.getElementById('referenceNote');
+const tagStatus=document.getElementById('tagStatus');
+const thighTagState=document.getElementById('thighTagState');
+const shankTagState=document.getElementById('shankTagState');
 const fps=document.getElementById('fps');
 const source=document.getElementById('source');
 const backend=document.getElementById('backend');
@@ -316,36 +284,6 @@ if('ResizeObserver' in window){
   const observer=new ResizeObserver(()=>drawAngleChart(window.latestAngleRows||[]));
   observer.observe(angleChart.parentElement);
 }
-function updateSliderLabels(){
-  confidenceThresholdValue.textContent=Number(confidenceThreshold.value).toFixed(2);
-  landmarkSmoothingValue.textContent=Number(landmarkSmoothing.value).toFixed(2);
-  angleSmoothingValue.textContent=Number(angleSmoothing.value).toFixed(2);
-  segmentLengthValue.textContent=Number(segmentLength.value).toFixed(3);
-  angleJumpValue.textContent=Number(angleJump.value).toFixed(0)+'°';
-}
-for (const id of ['confidenceThreshold','landmarkSmoothing','angleSmoothing','segmentLength','angleJump']) {
-  document.getElementById(id).addEventListener('input',updateSliderLabels);
-}
-function loadTuning(t){
-  if(!t) return;
-  for(const [key,id] of Object.entries(ids)) if(t[key]!==undefined) document.getElementById(id).value=t[key];
-  updateSliderLabels();
-}
-async function applyTuning(){
-  const payload={
-    leg_side:legSide.value,
-    frame_rotation:frameRotation.value,
-    confidence_threshold:Number(confidenceThreshold.value),
-    landmark_smoothing:Number(landmarkSmoothing.value),
-    angle_smoothing:Number(angleSmoothing.value),
-    min_segment_length:Number(segmentLength.value),
-    max_angle_jump_deg:Number(angleJump.value)
-  };
-  const r=await fetch('/api/tuning',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-  const body=await r.json();
-  tuningMessage.textContent=r.ok?'Tuning applied live.':('Tuning rejected: '+(body.error||'unknown error'));
-  if(r.ok) loadTuning(body);
-}
 async function refreshImuPorts(){
   const selected=imuPort.value;
   try {
@@ -389,8 +327,8 @@ const CALIBRATION_GUIDANCE={
     title:'Static calibration test',
     intro:'The tool records for 12 seconds and then stops automatically.',
     steps:[
-      'Wear both IMUs firmly on the thigh and shank of the leg shown to the camera.',
-      'Keep the complete hip–knee–ankle chain visible and wait for Tracking VALID.',
+      'Wear both IMUs firmly and keep Tag 0 on the thigh and Tag 1 on the shank visible to the side camera.',
+      'Keep both AprilTags visible and wait for Reference VALID.',
       'Choose one comfortable knee angle and remain completely still for the full test.'
     ]
   },
@@ -398,8 +336,8 @@ const CALIBRATION_GUIDANCE={
     title:'Dynamic calibration test',
     intro:'The tool records for 25 seconds and then generates the recommended settings.',
     steps:[
-      'Keep exactly the same IMU mounting and camera position used for the static test.',
-      'Keep the complete hip–knee–ankle chain visible and wait for Tracking VALID.',
+      'Keep exactly the same IMU, tag, and camera mounting used for the static test.',
+      'Keep both AprilTags visible and wait for Reference VALID.',
       'Perform about five slow, smooth flexion–extension cycles without sudden movements.'
     ]
   }
@@ -527,11 +465,17 @@ async function refresh(){
     t.textContent=s.tracking_valid?'VALID':'INVALID'; t.className='value '+(s.tracking_valid?'ok':'bad');
     reason.textContent=s.tracking_reason||'—';
     angle.textContent=s.visual_knee_angle_deg==null?'--.-°':Number(s.visual_knee_angle_deg).toFixed(1)+'°';
-    rawAngle.textContent=s.raw_knee_angle_deg==null?'Raw: --.-°':'Raw: '+Number(s.raw_knee_angle_deg).toFixed(1)+'°';
-    confidence.textContent=Number(s.pose_confidence).toFixed(2);
-    fps.textContent=Number(s.inference_fps).toFixed(1)+' FPS';
+    referenceNote.textContent=s.tracking_valid?'Calibrated 3-D tag reference':'3-D setup required';
+    const detected=Number(Boolean(s.thigh_tag_detected))+Number(Boolean(s.shank_tag_detected));
+    tagStatus.textContent=detected+' / 2';
+    tagStatus.className='value '+(detected===2?'ok':'bad');
+    thighTagState.textContent='Thigh · Tag 0: '+(s.thigh_tag_detected?'DETECTED':'NOT DETECTED');
+    thighTagState.className='note '+(s.thigh_tag_detected?'ok':'bad');
+    shankTagState.textContent='Shank · Tag 1: '+(s.shank_tag_detected?'DETECTED':'NOT DETECTED');
+    shankTagState.className='note '+(s.shank_tag_detected?'ok':'bad');
+    fps.textContent=Number(s.processing_fps||0).toFixed(1)+' FPS';
     source.textContent='Source: '+(s.source||'—');
-    backend.textContent='Backend: '+(s.pose_backend||'—');
+    backend.textContent='Backend: '+(s.reference_backend||'—');
     runtime.textContent=s.error?`${s.state}: ${s.error}`:s.state;
     frameCount.textContent='Frames: '+Number(s.frame_index||0);
     const imu=s.imu||{};
@@ -563,7 +507,7 @@ async function refresh(){
     if(imu.port && [...imuPort.options].some(o=>o.value===imu.port)) imuPort.value=imu.port;
     const camera=s.camera||{};
     if(!window.cameraProfileLoaded && camera.profile){ cameraProfile.value=camera.profile; window.cameraProfileLoaded=true; }
-    applyCameraProfile.disabled=Boolean((s.recording||{}).active)||calibrationLocked||camera.reconfigurable===false||!['CAMERA_PREVIEW','RUNNING','AI_FAILED'].includes(s.state);
+    applyCameraProfile.disabled=Boolean((s.recording||{}).active)||calibrationLocked||camera.reconfigurable===false||!['CAMERA_PREVIEW','RUNNING','REFERENCE_FAILED'].includes(s.state);
     const cal=s.calibration||{};
     calibrationState.textContent=String(cal.state||'IDLE').replaceAll('_',' ');
     calibrationState.className='value small '+(cal.valid?'ok':(cal.state==='FAILED'||cal.state==='INVALID'?'bad':''));
@@ -592,7 +536,6 @@ async function refresh(){
     if(rec.display_path) recordingPath.textContent=(rec.active?'ZIP destination: ':'Open saved ZIP: ')+rec.display_path;
     else recordingPath.textContent='Open video recordings: video_recordings';
     if(rec.error) recordingPath.textContent='Recorder error: '+rec.error;
-    if(!window.tuningLoaded && s.tuning){ loadTuning(s.tuning); window.tuningLoaded=true; }
   } catch(e) { runtime.textContent='UI connection error: '+e; }
 }
 setInterval(refresh,350); setInterval(refreshHistory,700); refresh(); refreshHistory(); resizeVideoShell();

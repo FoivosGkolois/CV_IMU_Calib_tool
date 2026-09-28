@@ -1,13 +1,19 @@
-"""PC-first Vision–IMU calibration feasibility prototype."""
+"""Vision–IMU calibration and tag-reference tooling."""
 
-from .geometry import KneeAngleResult, calculate_knee_flexion_deg
-from .models import Landmark, LegLandmarks, LegSide, PoseFrame
+from .marker_reference import (
+    APRILTAG_DICTIONARY_NAME,
+    SHANK_TAG_ID,
+    THIGH_TAG_ID,
+    AprilTagReference,
+    MarkerDetection,
+    MarkerReferenceResult,
+)
 
 __all__ = [
-    "KneeAngleResult",
-    "Landmark",
-    "LegLandmarks",
-    "LegSide",
-    "PoseFrame",
-    "calculate_knee_flexion_deg",
+    "APRILTAG_DICTIONARY_NAME",
+    "SHANK_TAG_ID",
+    "THIGH_TAG_ID",
+    "AprilTagReference",
+    "MarkerDetection",
+    "MarkerReferenceResult",
 ]

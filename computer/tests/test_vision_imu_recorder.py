@@ -56,7 +56,7 @@ def test_annotated_recorder_finalizes_one_zip_without_loose_trial_folder(
     fake_cv2 = FakeCv2()
     monkeypatch.setattr("computer.vision_imu_calibration.recorder._load_cv2", lambda: fake_cv2)
     recorder = AnnotatedVideoRecorder(tmp_path)
-    recorder.request_start(settings={"confidence_threshold": 0.55}, source="camera:0")
+    recorder.request_start(settings={"reference_backend": "AprilTag 36h11"}, source="camera:0")
     frame = np.zeros((120, 160, 3), dtype=np.uint8)
     recorder.write(
         frame,
@@ -64,12 +64,12 @@ def test_annotated_recorder_finalizes_one_zip_without_loose_trial_folder(
         sample={
             "frame_index": 1,
             "visual_knee_angle_deg": 142.0,
-            "raw_knee_angle_deg": 143.0,
-            "pose_confidence": 0.9,
-            "tracking_valid": True,
-            "tracking_reason": "ok",
-            "tracked_leg": "right",
-            "inference_fps": 12.5,
+            "tracking_valid": False,
+            "tracking_reason": "reference_setup_required",
+            "marker_quality": 1.0,
+            "thigh_tag_detected": True,
+            "shank_tag_detected": True,
+            "processing_fps": 12.5,
         },
     )
     status = recorder.stop()
@@ -82,13 +82,13 @@ def test_annotated_recorder_finalizes_one_zip_without_loose_trial_folder(
     with ZipFile(status.archive_path) as archive:
         names = set(archive.namelist())
     assert "recording_metadata.json" in names
-    assert "pose_timeline.csv" in names
+    assert "reference_timeline.csv" in names
     assert all("/" not in name.rstrip("/") for name in names)
     metadata = _zip_json(status.archive_path, "recording_metadata.json")
     assert metadata["source"] == "camera:0"
     assert metadata["record_fps"] == 12.5
     assert metadata["archive_layout"] == "files_at_zip_root"
-    timeline = _zip_text(status.archive_path, "pose_timeline.csv")
+    timeline = _zip_text(status.archive_path, "reference_timeline.csv")
     assert "visual_knee_angle_deg" in timeline
     assert "142.0" in timeline
 
@@ -111,12 +111,12 @@ def test_recorder_resamples_video_to_monotonic_elapsed_time(
     sample = {
         "frame_index": 1,
         "visual_knee_angle_deg": 170.0,
-        "raw_knee_angle_deg": 170.0,
-        "pose_confidence": 0.8,
-        "tracking_valid": True,
-        "tracking_reason": "ok",
-        "tracked_leg": "right",
-        "inference_fps": 10.0,
+        "tracking_valid": False,
+        "tracking_reason": "reference_setup_required",
+        "marker_quality": 1.0,
+        "thigh_tag_detected": True,
+        "shank_tag_detected": True,
+        "processing_fps": 10.0,
     }
 
     recorder.write(frame, preferred_fps=10.0, sample=sample)
@@ -159,18 +159,16 @@ def test_recorder_writes_raw_imu_and_builds_synchronized_timeline(
             "host_monotonic_ns": 2_010_000_000,
             "frame_index": 1,
             "visual_knee_angle_deg": 150.0,
-            "raw_knee_angle_deg": 149.0,
-            "pose_confidence": 0.9,
-            "tracking_valid": True,
-            "tracking_reason": "ok",
-            "tracked_leg": "right",
-            "inference_fps": 10.0,
-            "hip_x": 0.4,
-            "hip_y": 0.3,
-            "knee_x": 0.5,
-            "knee_y": 0.5,
-            "ankle_x": 0.6,
-            "ankle_y": 0.8,
+            "tracking_valid": False,
+            "tracking_reason": "reference_setup_required",
+            "marker_quality": 1.0,
+            "thigh_tag_detected": True,
+            "shank_tag_detected": True,
+            "thigh_tag_center_x": 120.0,
+            "thigh_tag_center_y": 180.0,
+            "shank_tag_center_x": 120.0,
+            "shank_tag_center_y": 360.0,
+            "processing_fps": 10.0,
         },
     )
     recorder.write_imu(

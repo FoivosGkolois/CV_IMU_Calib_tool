@@ -1171,7 +1171,7 @@ def _write_suggestions_yaml(
         "generated_at": datetime.now().astimezone().isoformat(),
         "status": str(status),
         "method": "static_offset_bias_plus_dynamic_grid_search",
-        "reference": "synchronized MoveNet knee-angle comparison",
+        "reference": "synchronized marker-based knee-angle comparison",
         "source_trials": {
             "static": STATIC_ARCHIVE_FILENAME,
             "dynamic": DYNAMIC_ARCHIVE_FILENAME,

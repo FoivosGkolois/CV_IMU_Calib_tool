@@ -11,11 +11,10 @@ def test_cli_accepts_uno_q_bridge_transport_without_serial_port() -> None:
     args = build_parser().parse_args(["--imu-transport", "uno-q-bridge"])
     assert args.imu_transport == "uno-q-bridge"
     assert args.imu_port is None
-    assert args.leg == "right"
     assert args.camera == "auto"
 
 
-def test_phase2_template_uses_headless_opencv_for_app_lab_container() -> None:
+def test_phase2_template_uses_headless_opencv_contrib_for_app_lab_container() -> None:
     project_root = Path(__file__).resolve().parents[2]
     requirements_path = (
         project_root
@@ -31,8 +30,9 @@ def test_phase2_template_uses_headless_opencv_for_app_lab_container() -> None:
         if line.strip() and not line.lstrip().startswith("#")
     }
 
-    assert "opencv-python-headless>=4.10,<5" in requirements
-    assert "opencv-python>=4.10,<5" not in requirements
+    assert "opencv-contrib-python-headless>=4.10,<5" in requirements
+    assert "opencv-python-headless>=4.10,<5" not in requirements
+    assert "ai-edge-litert==2.1.6" not in requirements
 
 
 def test_phase2_builder_creates_self_contained_app_payload(tmp_path: Path) -> None:
