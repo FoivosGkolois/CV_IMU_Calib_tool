@@ -130,6 +130,7 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
     <div class="label">Recommended IMU filter settings</div>
     <div id="imuRecommendationState" class="note">Complete both stages of one calibration run to generate data-driven settings.</div>
     <div id="imuRecommendationValues" class="recommendation-values"></div>
+    <div id="imuValidationSummary" class="note"></div>
   </div>
 </section>
 <aside class="control-panel">
@@ -219,7 +220,7 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
   </details>
 </aside>
 </main>
-<footer>Fixed two-tag geometric reference. Persistent camera setup is calibration-gated; scientific IMU tuning remains locked until its later migration step.</footer>
+<footer>Validated two-tag geometric reference · physics-based static calibration · GP Bayesian Optimization · held-out validation.</footer>
 </div>
 <div id="calibrationModal" class="modal-backdrop" hidden>
   <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="calibrationModalTitle">
@@ -251,6 +252,7 @@ const startRecording=document.getElementById('startRecording');
 const stopRecording=document.getElementById('stopRecording');
 const recordingPath=document.getElementById('recordingPath');
 const calibrationState=document.getElementById('calibrationState');
+const imuValidationSummary=document.getElementById('imuValidationSummary');
 const calibrationMessage=document.getElementById('calibrationMessage');
 const calibrationProgress=document.getElementById('calibrationProgress');
 const startStaticTest=document.getElementById('startStaticTest');
@@ -484,6 +486,13 @@ function updateImuRecommendations(cal){
       `deadband ${Number(p.gyro_deadband_deg_s).toFixed(2)}°/s · straight offset ${Number(p.straight_leg_offset_deg).toFixed(2)}° · `+
       `gyro bias thigh/shank ${Number(p.thigh_gyro_bias_deg_s).toFixed(3)} / ${Number(p.shank_gyro_bias_deg_s).toFixed(3)}°/s · `+
       `max accel correction ${Number(p.max_accel_correction_deg).toFixed(1)}° · relative sign ${Number(p.relative_angle_sign).toFixed(0)}`;
+    const summary=cal.result_summary||{};
+    const ci=summary.held_out_rmse_ci95_deg;
+    imuValidationSummary.textContent=Object.keys(summary).length ?
+      `${summary.optimizer||'Optimizer'} · held-out RMSE ${Number(summary.held_out_rmse_deg).toFixed(2)}° · `+
+      `MAE ${Number(summary.held_out_mae_deg).toFixed(2)}° · lag ${Number(summary.held_out_lag_ms).toFixed(0)} ms · `+
+      `RMSE change ${Number(summary.held_out_rmse_improvement_percent).toFixed(1)}%`+
+      (Array.isArray(ci)?` · 95% CI ${Number(ci[0]).toFixed(2)}–${Number(ci[1]).toFixed(2)}°`:'') : '';
     return;
   }
   const staticSuggestion=(cal&&cal.static_suggestion)||{};
@@ -498,6 +507,7 @@ function updateImuRecommendations(cal){
   }
   imuRecommendationState.className='note';
   imuRecommendationValues.textContent='';
+  imuValidationSummary.textContent='';
   if(cal&&String(cal.state||'').startsWith('ANALYZING')) imuRecommendationState.textContent='Analyzing calibration data and updating the shared suggestions YAML…';
   else if(cal&&(cal.state==='INVALID'||cal.state==='FAILED')) imuRecommendationState.textContent='No valid recommendation was generated. Review the calibration result and repeat the failed test.';
   else imuRecommendationState.textContent='Complete both stages of one calibration run to generate data-driven settings.';

@@ -203,9 +203,12 @@ def test_page_hides_serial_controls_for_bridge_and_renders_recommendations(tmp_p
     assert "else if(!window.imuPortsLoaded) refreshImuPorts()" in html
     assert 'id="imuRecommendationState"' in html
     assert 'id="imuRecommendationValues"' in html
+    assert 'id="imuValidationSummary"' in html
     assert "static_suggestion" in html
     assert "dynamic_suggestion" in html
     assert "recommended_parameters" in html
+    assert "held_out_rmse_deg" in html
+    assert "GP Bayesian Optimization" in html
 
 
 def test_guided_calibration_is_one_two_stage_session(tmp_path: Path) -> None:

@@ -15,6 +15,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
+from .bayesian_optimizer import (
+    BO_EVALUATION_BUDGET,
+    BO_RANDOM_SEED,
+    optimize_filter_parameters,
+    parameter_bounds_payload,
+    sample_random_parameters,
+)
 from .imu_filter import KneeAngleEstimate, KneeAngleFilterMirror, KneeAngleFilterParameters
 from .imu_serial import ImuCalibrationSample
 
@@ -46,6 +53,7 @@ class CalibrationStatus:
     static_suggestion: dict[str, Any]
     dynamic_suggestion: dict[str, Any]
     recommended_parameters: dict[str, Any]
+    result_summary: dict[str, Any]
     report_path: str
     overview_path: str
     valid: bool
@@ -93,6 +101,7 @@ class CalibrationWorkflow:
         self._static_suggestion: dict[str, Any] = {}
         self._dynamic_suggestion: dict[str, Any] = {}
         self._recommended_parameters: dict[str, Any] = {}
+        self._result_summary: dict[str, Any] = {}
         self._report_path: Path | None = None
         self._overview_path: Path | None = None
         self._base_parameters: KneeAngleFilterParameters | None = None
@@ -126,6 +135,7 @@ class CalibrationWorkflow:
                 expected_dynamic.unlink(missing_ok=True)
                 self._dynamic_suggestion = {}
                 self._recommended_parameters = dict(self._static_suggestion)
+                self._result_summary = {}
                 self._report_path = None
                 self._overview_path = None
                 (self._run_directory / "calibration_report.json").unlink(missing_ok=True)
@@ -246,6 +256,7 @@ class CalibrationWorkflow:
             self._static_suggestion = dict(result.get("static_suggestion") or {})
             self._dynamic_suggestion = dict(result.get("dynamic_suggestion") or {})
             self._recommended_parameters = dict(result.get("recommended_parameters") or {})
+            self._result_summary = dict(result.get("result_summary") or {})
             self._report_path = _optional_path(result.get("report_path"))
             self._overview_path = _optional_path(result.get("overview_path"))
             self._valid = bool(result.get("valid"))
@@ -360,6 +371,7 @@ class CalibrationWorkflow:
         self._static_suggestion = {}
         self._dynamic_suggestion = {}
         self._recommended_parameters = {}
+        self._result_summary = {}
         self._report_path = None
         self._overview_path = None
         self._base_parameters = base_parameters
@@ -383,6 +395,7 @@ class CalibrationWorkflow:
         self._static_suggestion = {}
         self._dynamic_suggestion = {}
         self._recommended_parameters = {}
+        self._result_summary = {}
         self._report_path = None
         self._overview_path = None
         self._base_parameters = None
@@ -420,6 +433,7 @@ class CalibrationWorkflow:
             static_suggestion=dict(self._static_suggestion),
             dynamic_suggestion=dict(self._dynamic_suggestion),
             recommended_parameters=dict(self._recommended_parameters),
+            result_summary=dict(self._result_summary),
             report_path=str(self._report_path or ""),
             overview_path=str(self._overview_path or ""),
             valid=self._valid,
@@ -518,11 +532,11 @@ def analyze_calibration_run(
     base_parameters: KneeAngleFilterParameters,
     output_directory: str | Path,
 ) -> dict[str, Any]:
-    """Complete Patch-3 calibration using physics-based static calibration and held-out cycles.
+    """Complete calibration with GP Bayesian optimization and held-out validation.
 
-    Static quantities are derived only from the stationary IMU data and the known
-    full-extension condition. Dynamic filter-design parameters are selected on
-    training cycles only. Held-out cycles are never used to select a candidate.
+    Static quantities come only from the stationary physical-reference stage. The
+    optimizer sees training cycles only. Held-out cycles are evaluated once after
+    each search method has selected its candidate from training performance.
     """
     output_dir = Path(output_directory).expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -570,10 +584,10 @@ def analyze_calibration_run(
 
     if failed_gates:
         report = {
-            "schema_version": "vision_imu_calibration_report_v2",
+            "schema_version": "vision_imu_calibration_report_v3",
             "generated_at": datetime.now().astimezone().isoformat(),
             "status": "INVALID",
-            "method": "physics_static_plus_cycle_split_dynamic_calibration",
+            "method": "physics_static_plus_gp_bayesian_optimization_with_held_out_validation",
             "quality_gates": gates,
             "failed_gates": failed_gates,
             "cycle_split": split_payload,
@@ -607,6 +621,7 @@ def analyze_calibration_run(
             "static_suggestion": static_suggestion,
             "dynamic_suggestion": {},
             "recommended_parameters": {},
+            "result_summary": {},
         }
 
     if static_result is None:
@@ -618,36 +633,152 @@ def analyze_calibration_run(
         dynamic_data, static_parameters, sync_rows=validation_rows
     )
 
-    # Patch 3 intentionally keeps the existing deterministic grid as a temporary
-    # search backend. Patch 4 replaces only this selector with GP Bayesian
-    # Optimization; the train/held-out separation established here remains.
-    candidates = _candidate_parameters(static_parameters)
-    evaluated: list[tuple[KneeAngleFilterParameters, EvaluationMetrics]] = []
-    for candidate in candidates:
-        metrics = evaluate_parameters(dynamic_data, candidate, sync_rows=train_rows)
-        if metrics.pair_count:
-            evaluated.append((candidate, metrics))
-    if not evaluated:
-        raise RuntimeError("No valid dynamic parameter candidate could be evaluated")
+    def evaluator(candidate: KneeAngleFilterParameters) -> EvaluationMetrics:
+        return evaluate_parameters(dynamic_data, candidate, sync_rows=train_rows)
 
-    recommended_parameters, recommended_train = min(
-        evaluated, key=lambda item: item[1].rmse_deg
+    def feasibility(metrics: EvaluationMetrics) -> tuple[bool, Sequence[str]]:
+        return _candidate_quality_constraints(metrics, baseline_train)
+
+    bo_started = time.perf_counter()
+    bo_result = optimize_filter_parameters(
+        static_parameters,
+        evaluator,
+        feasibility,
+        evaluation_budget=BO_EVALUATION_BUDGET,
+        seed=BO_RANDOM_SEED,
     )
+    bo_runtime_s = time.perf_counter() - bo_started
+    recommended_parameters = bo_result.parameters
+    recommended_train = bo_result.metrics
     recommended_validation = evaluate_parameters(
         dynamic_data, recommended_parameters, sync_rows=validation_rows
     )
 
-    held_out_improvement_percent = 0.0
-    if baseline_validation.rmse_deg > 1e-9 and math.isfinite(baseline_validation.rmse_deg):
-        held_out_improvement_percent = 100.0 * (
-            baseline_validation.rmse_deg - recommended_validation.rmse_deg
-        ) / baseline_validation.rmse_deg
+    random_started = time.perf_counter()
+    random_candidates = sample_random_parameters(
+        static_parameters,
+        BO_EVALUATION_BUDGET,
+        seed=BO_RANDOM_SEED + 101,
+    )
+    random_selection = _select_best_from_candidates(
+        dynamic_data,
+        random_candidates,
+        train_rows=train_rows,
+        baseline_train=baseline_train,
+    )
+    random_runtime_s = time.perf_counter() - random_started
+
+    grid_started = time.perf_counter()
+    grid_candidates = _budgeted_grid_candidates(static_parameters, BO_EVALUATION_BUDGET)
+    grid_selection = _select_best_from_candidates(
+        dynamic_data,
+        grid_candidates,
+        train_rows=train_rows,
+        baseline_train=baseline_train,
+    )
+    grid_runtime_s = time.perf_counter() - grid_started
+
+    held_out_improvement_percent = _rmse_improvement_percent(
+        baseline_validation.rmse_deg,
+        recommended_validation.rmse_deg,
+    )
+    bootstrap = _bootstrap_validation_uncertainty(
+        dynamic_data,
+        baseline_parameters=static_parameters,
+        recommended_parameters=recommended_parameters,
+        validation_cycles=validation_cycles,
+    )
+    reference_uncertainty = _reference_uncertainty_summary(validation_rows)
+
+    search_comparison: dict[str, Any] = {
+        "same_training_evaluation_budget": BO_EVALUATION_BUDGET,
+        "selection_data": "training_cycles_only",
+        "held_out_used_for_selection": False,
+        "bayesian_optimization": {
+            "evaluation_count": bo_result.evaluation_budget,
+            "training_best_rmse_deg": recommended_train.rmse_deg,
+            "held_out_rmse_deg": recommended_validation.rmse_deg,
+            "runtime_s": bo_runtime_s,
+        },
+    }
+    if random_selection is not None:
+        random_parameters, random_train = random_selection
+        random_validation = evaluate_parameters(
+            dynamic_data, random_parameters, sync_rows=validation_rows
+        )
+        search_comparison["random_search"] = {
+            "evaluation_count": len(random_candidates),
+            "training_best_rmse_deg": random_train.rmse_deg,
+            "held_out_rmse_deg": random_validation.rmse_deg,
+            "runtime_s": random_runtime_s,
+            "selected_parameters": _parameter_payload(random_parameters),
+        }
+    else:
+        search_comparison["random_search"] = {
+            "evaluation_count": len(random_candidates),
+            "status": "no_feasible_candidate",
+            "runtime_s": random_runtime_s,
+        }
+    if grid_selection is not None:
+        grid_parameters, grid_train = grid_selection
+        grid_validation = evaluate_parameters(
+            dynamic_data, grid_parameters, sync_rows=validation_rows
+        )
+        search_comparison["budgeted_grid_search"] = {
+            "evaluation_count": len(grid_candidates),
+            "training_best_rmse_deg": grid_train.rmse_deg,
+            "held_out_rmse_deg": grid_validation.rmse_deg,
+            "runtime_s": grid_runtime_s,
+            "selected_parameters": _parameter_payload(grid_parameters),
+        }
+    else:
+        search_comparison["budgeted_grid_search"] = {
+            "evaluation_count": len(grid_candidates),
+            "status": "no_feasible_candidate",
+            "runtime_s": grid_runtime_s,
+        }
+
+    optimization_payload = {
+        "backend": "gaussian_process_bayesian_optimization",
+        "surrogate": "gaussian_process_rbf_normalized_parameter_space",
+        "acquisition": "expected_improvement",
+        "evaluation_budget": bo_result.evaluation_budget,
+        "random_seed": bo_result.random_seed,
+        "initial_design_size": bo_result.initial_design_size,
+        "candidate_pool_size": bo_result.candidate_pool_size,
+        "optimized_parameters": [
+            "alpha_stable",
+            "alpha_dynamic",
+            "max_accel_correction_deg",
+        ],
+        "parameter_bounds": parameter_bounds_payload(),
+        "primary_objective": "training_cycle_rmse_deg",
+        "candidate_specific_time_shift": False,
+        "held_out_used_for_selection": False,
+        "hard_candidate_constraints": _candidate_constraint_definition(baseline_train),
+        "feasible_evaluation_count": sum(
+            1 for observation in bo_result.observations if observation.feasible
+        ),
+        "gp_uncertainty": bo_result.gp_uncertainty,
+        "search_trace": bo_result.trace_payload(),
+        "search_comparison": search_comparison,
+    }
+
+    validation_payload = {
+        "training_baseline": baseline_train.to_dict(),
+        "training_recommended": recommended_train.to_dict(),
+        "held_out_baseline": baseline_validation.to_dict(),
+        "held_out_recommended": recommended_validation.to_dict(),
+        "held_out_rmse_improvement_percent": held_out_improvement_percent,
+        "bootstrap": bootstrap,
+        "reference_uncertainty": reference_uncertainty,
+    }
 
     report = {
-        "schema_version": "vision_imu_calibration_report_v2",
+        "schema_version": "vision_imu_calibration_report_v3",
         "generated_at": datetime.now().astimezone().isoformat(),
         "status": "VALID",
-        "method": "physics_static_plus_cycle_split_dynamic_calibration",
+        "method": "physics_static_plus_gp_bayesian_optimization_with_held_out_validation",
         "reference": {
             "type": "marker_based_geometric_reference",
             "statement": (
@@ -668,30 +799,35 @@ def analyze_calibration_run(
         "static_derivation": {
             key: value for key, value in static_result.items() if key != "parameters"
         },
-        "optimization": {
-            "temporary_search_backend": "deterministic_grid_search",
-            "primary_objective": "training_cycle_rmse_deg",
-            "candidate_specific_time_shift": False,
-            "held_out_used_for_selection": False,
-            "candidate_count": len(evaluated),
-        },
-        "metrics": {
-            "training_baseline": baseline_train.to_dict(),
-            "training_recommended": recommended_train.to_dict(),
-            "held_out_baseline": baseline_validation.to_dict(),
-            "held_out_recommended": recommended_validation.to_dict(),
-            "held_out_rmse_improvement_percent": held_out_improvement_percent,
-            "candidate_count": len(evaluated),
+        "optimization": optimization_payload,
+        "metrics": validation_payload,
+        "uncertainty": {
+            "gp_model": bo_result.gp_uncertainty,
+            "held_out_validation": bootstrap,
+            "marker_reference": reference_uncertainty,
         },
         "limitations": [
-            "The marker system is an engineering reference, not absolute ground truth; setup-level uncertainty should be quantified separately.",
+            "The marker system is an engineering reference, not absolute ground truth.",
+            "Image-space marker quality is reported, but angular reference uncertainty remains unquantified until the separate known-angle validation is performed.",
             "The recommendation is valid only for the tested sensor mounting and movement range.",
-            "The current search backend remains a deterministic grid until Patch 4 replaces it with GP Bayesian Optimization.",
             "Estimated lag is reported diagnostically and is never optimized away per candidate.",
+            "Random and budgeted-grid searches are same-budget engineering comparators, not a statistical superiority claim from one calibration run.",
         ],
     }
     _atomic_write_json(report_path, report)
     dynamic_suggestion = _parameter_payload(recommended_parameters)
+    result_summary = {
+        "optimizer": "GP Bayesian Optimization",
+        "evaluation_budget": bo_result.evaluation_budget,
+        "held_out_rmse_deg": recommended_validation.rmse_deg,
+        "held_out_mae_deg": recommended_validation.mae_deg,
+        "held_out_lag_ms": recommended_validation.lag_ms,
+        "held_out_rmse_improvement_percent": held_out_improvement_percent,
+        "held_out_rmse_ci95_deg": bootstrap.get("recommended_rmse_ci95_deg"),
+        "gp_recommended_std_rmse_deg": bo_result.gp_uncertainty.get(
+            "recommended_posterior_std_rmse_deg"
+        ),
+    }
     _write_suggestions_yaml(
         recommendation_path,
         status="complete",
@@ -701,6 +837,20 @@ def analyze_calibration_run(
         final_parameters=dynamic_suggestion,
         held_out_rmse_improvement_percent=held_out_improvement_percent,
         cycle_split=split_payload,
+        optimization_summary={
+            "backend": "gaussian_process_bayesian_optimization",
+            "evaluation_budget": bo_result.evaluation_budget,
+            "primary_objective": "training_cycle_rmse_deg",
+            "held_out_used_for_selection": False,
+            "gp_uncertainty": bo_result.gp_uncertainty,
+        },
+        validation_summary={
+            "held_out_rmse_deg": recommended_validation.rmse_deg,
+            "held_out_mae_deg": recommended_validation.mae_deg,
+            "held_out_lag_ms": recommended_validation.lag_ms,
+            "held_out_rmse_improvement_percent": held_out_improvement_percent,
+            "bootstrap": bootstrap,
+        },
     )
     _write_calibration_overview(
         overview_path,
@@ -713,8 +863,8 @@ def analyze_calibration_run(
     return {
         "valid": True,
         "message": (
-            "Calibration complete. Recommended settings and report were exported. "
-            f"Held-out RMSE change: {held_out_improvement_percent:+.1f}%."
+            "Calibration complete. GP Bayesian Optimization recommendation validated on "
+            f"held-out cycles; RMSE change {held_out_improvement_percent:+.1f}%."
         ),
         "error": "",
         "report_path": str(report_path),
@@ -723,6 +873,7 @@ def analyze_calibration_run(
         "static_suggestion": static_suggestion,
         "dynamic_suggestion": dynamic_suggestion,
         "recommended_parameters": _parameter_payload(recommended_parameters),
+        "result_summary": result_summary,
     }
 
 def load_archive_data(archive_path: str | Path) -> ArchiveData:
@@ -885,6 +1036,229 @@ def _candidate_parameters(
                 candidates.append(candidate)
     return candidates
 
+
+def _candidate_quality_constraints(
+    metrics: EvaluationMetrics,
+    baseline_train: EvaluationMetrics,
+) -> tuple[bool, list[str]]:
+    """Hard candidate gates used by Patch 4 instead of a weighted score."""
+    reasons: list[str] = []
+    numeric_values = (
+        metrics.mae_deg,
+        metrics.rmse_deg,
+        metrics.p95_abs_error_deg,
+        metrics.max_abs_error_deg,
+        metrics.lag_ms,
+        metrics.jitter_deg_per_frame,
+        metrics.drift_deg,
+    )
+    if not all(math.isfinite(float(value)) for value in numeric_values):
+        reasons.append("non_finite_metric")
+    minimum_pairs = max(20, int(math.floor(0.95 * baseline_train.pair_count)))
+    if metrics.pair_count < minimum_pairs:
+        reasons.append("insufficient_comparison_pairs")
+    # Lag estimation scans only [-250, +250] ms. Landing on the boundary means
+    # the lag estimate is unresolved rather than a trustworthy in-range optimum.
+    if abs(metrics.lag_ms) >= 250.0:
+        reasons.append("lag_at_diagnostic_search_boundary")
+    # Reject clearly noisier candidates relative to the measured baseline rather
+    # than adding jitter to the objective with an arbitrary score weight.
+    jitter_limit = max(1.0, 2.0 * baseline_train.jitter_deg_per_frame + 0.25)
+    if metrics.jitter_deg_per_frame > jitter_limit:
+        reasons.append("excessive_error_jitter")
+    return not reasons, reasons
+
+
+def _candidate_constraint_definition(
+    baseline_train: EvaluationMetrics,
+) -> dict[str, Any]:
+    return {
+        "comparison_pairs": {
+            "rule": ">= 95% of baseline training pairs, minimum 20",
+            "threshold": max(20, int(math.floor(0.95 * baseline_train.pair_count))),
+        },
+        "lag": {
+            "rule": "absolute estimated lag must stay inside the diagnostic search range",
+            "threshold_ms": 250.0,
+            "boundary_is_rejected": True,
+        },
+        "jitter": {
+            "rule": "candidate error jitter <= max(1.0 deg/frame, 2x baseline + 0.25 deg/frame)",
+            "threshold_deg_per_frame": max(
+                1.0, 2.0 * baseline_train.jitter_deg_per_frame + 0.25
+            ),
+        },
+        "finite_metrics_required": True,
+    }
+
+
+def _select_best_from_candidates(
+    data: ArchiveData,
+    candidates: Sequence[KneeAngleFilterParameters],
+    *,
+    train_rows: Sequence[Mapping[str, str]],
+    baseline_train: EvaluationMetrics,
+) -> tuple[KneeAngleFilterParameters, EvaluationMetrics] | None:
+    best: tuple[KneeAngleFilterParameters, EvaluationMetrics] | None = None
+    for candidate in candidates:
+        metrics = evaluate_parameters(data, candidate, sync_rows=train_rows)
+        feasible, _reasons = _candidate_quality_constraints(metrics, baseline_train)
+        if not feasible:
+            continue
+        if best is None or metrics.rmse_deg < best[1].rmse_deg:
+            best = (candidate, metrics)
+    return best
+
+
+def _budgeted_grid_candidates(
+    static_parameters: KneeAngleFilterParameters,
+    budget: int,
+) -> list[KneeAngleFilterParameters]:
+    all_candidates = _candidate_parameters(static_parameters)
+    target = max(1, min(int(budget), len(all_candidates)))
+    if target >= len(all_candidates):
+        return all_candidates
+    indices = [
+        int(round(index * (len(all_candidates) - 1) / max(1, target - 1)))
+        for index in range(target)
+    ]
+    selected = [static_parameters]
+    selected.extend(all_candidates[index] for index in indices)
+    deduped: list[KneeAngleFilterParameters] = []
+    seen: set[tuple[float, float, float]] = set()
+    for candidate in selected:
+        signature = (
+            round(candidate.alpha_stable, 9),
+            round(candidate.alpha_dynamic, 9),
+            round(candidate.max_accel_correction_deg, 9),
+        )
+        if signature in seen:
+            continue
+        seen.add(signature)
+        deduped.append(candidate)
+        if len(deduped) >= target:
+            break
+    if len(deduped) < target:
+        for candidate in all_candidates:
+            signature = (
+                round(candidate.alpha_stable, 9),
+                round(candidate.alpha_dynamic, 9),
+                round(candidate.max_accel_correction_deg, 9),
+            )
+            if signature in seen:
+                continue
+            seen.add(signature)
+            deduped.append(candidate)
+            if len(deduped) >= target:
+                break
+    return deduped
+
+
+def _rmse_improvement_percent(baseline_rmse: float, candidate_rmse: float) -> float:
+    if baseline_rmse <= 1e-9 or not math.isfinite(baseline_rmse):
+        return 0.0
+    return 100.0 * (baseline_rmse - candidate_rmse) / baseline_rmse
+
+
+def _bootstrap_validation_uncertainty(
+    data: ArchiveData,
+    *,
+    baseline_parameters: KneeAngleFilterParameters,
+    recommended_parameters: KneeAngleFilterParameters,
+    validation_cycles: Sequence[Mapping[str, Any]],
+    resamples: int = 2000,
+) -> dict[str, Any]:
+    per_cycle: list[dict[str, Any]] = []
+    for cycle in validation_cycles:
+        rows = _rows_for_cycles(data.sync_rows, [cycle])
+        baseline = evaluate_parameters(data, baseline_parameters, sync_rows=rows)
+        recommended = evaluate_parameters(data, recommended_parameters, sync_rows=rows)
+        if baseline.pair_count <= 0 or recommended.pair_count <= 0:
+            continue
+        per_cycle.append(
+            {
+                "cycle_id": int(cycle["cycle_id"]),
+                "baseline_rmse_deg": baseline.rmse_deg,
+                "recommended_rmse_deg": recommended.rmse_deg,
+                "pair_count": min(baseline.pair_count, recommended.pair_count),
+            }
+        )
+    payload: dict[str, Any] = {
+        "method": "cycle_level_nonparametric_bootstrap",
+        "resamples": int(resamples),
+        "held_out_cycle_count": len(per_cycle),
+        "available": len(per_cycle) >= 2,
+        "per_cycle": per_cycle,
+    }
+    if len(per_cycle) < 2:
+        payload["reason"] = "At least two held-out cycles are required for a cycle-level confidence interval."
+        payload["recommended_rmse_ci95_deg"] = None
+        payload["improvement_percent_ci95"] = None
+        return payload
+
+    rng = __import__("numpy").random.default_rng(BO_RANDOM_SEED + 404)
+    recommended_draws: list[float] = []
+    improvement_draws: list[float] = []
+    count = len(per_cycle)
+    for _ in range(int(resamples)):
+        selected = [per_cycle[int(index)] for index in rng.integers(0, count, size=count)]
+        total_pairs = sum(max(1, int(item["pair_count"])) for item in selected)
+        baseline_sq = sum(
+            max(1, int(item["pair_count"])) * float(item["baseline_rmse_deg"]) ** 2
+            for item in selected
+        ) / total_pairs
+        recommended_sq = sum(
+            max(1, int(item["pair_count"])) * float(item["recommended_rmse_deg"]) ** 2
+            for item in selected
+        ) / total_pairs
+        baseline_rmse = math.sqrt(max(0.0, baseline_sq))
+        recommended_rmse = math.sqrt(max(0.0, recommended_sq))
+        recommended_draws.append(recommended_rmse)
+        improvement_draws.append(
+            _rmse_improvement_percent(baseline_rmse, recommended_rmse)
+        )
+    payload["recommended_rmse_ci95_deg"] = [
+        _percentile(recommended_draws, 2.5),
+        _percentile(recommended_draws, 97.5),
+    ]
+    payload["improvement_percent_ci95"] = [
+        _percentile(improvement_draws, 2.5),
+        _percentile(improvement_draws, 97.5),
+    ]
+    return payload
+
+
+def _reference_uncertainty_summary(
+    validation_rows: Sequence[Mapping[str, str]],
+) -> dict[str, Any]:
+    valid_rows = _valid_sync_rows(validation_rows)
+    thigh = [
+        value
+        for row in valid_rows
+        if (value := _to_float(row.get("thigh_reprojection_rmse_px"))) is not None
+    ]
+    shank = [
+        value
+        for row in valid_rows
+        if (value := _to_float(row.get("shank_reprojection_rmse_px"))) is not None
+    ]
+    reprojection = thigh + shank
+    return {
+        "angular_uncertainty_quantified": False,
+        "status": "known_angle_reference_validation_required",
+        "statement": (
+            "This run reports image-space pose quality only. Angular reference uncertainty "
+            "must come from the separate known-angle mechanical validation of the marker setup."
+        ),
+        "valid_reference_row_count": len(valid_rows),
+        "reprojection_rmse_px_median": (
+            statistics.median(reprojection) if reprojection else None
+        ),
+        "reprojection_rmse_px_p95": (
+            _percentile(reprojection, 95.0) if reprojection else None
+        ),
+        "reprojection_rmse_px_max": max(reprojection) if reprojection else None,
+    }
 
 def _static_quality_gates(
     static_data: ArchiveData,
@@ -1348,6 +1722,8 @@ def _write_suggestions_yaml(
     cycle_split: Mapping[str, Any] | None = None,
     failed_gates: Sequence[str] | None = None,
     error: str | None = None,
+    optimization_summary: Mapping[str, Any] | None = None,
+    validation_summary: Mapping[str, Any] | None = None,
 ) -> None:
     try:
         import yaml
@@ -1372,7 +1748,7 @@ def _write_suggestions_yaml(
         "calibration_id": run_id,
         "generated_at": datetime.now().astimezone().isoformat(),
         "status": str(status),
-        "method": "physics_static_plus_cycle_split_dynamic_grid_search",
+        "method": "physics_static_plus_cycle_split_gp_bayesian_optimization",
         "reference": "synchronized marker-based knee-angle comparison",
         "source_trials": {
             "static": STATIC_ARCHIVE_FILENAME,
@@ -1396,6 +1772,10 @@ def _write_suggestions_yaml(
         )
     if cycle_split is not None:
         payload["cycle_split"] = dict(cycle_split)
+    if optimization_summary is not None:
+        payload["optimization"] = dict(optimization_summary)
+    if validation_summary is not None:
+        payload["validation"] = dict(validation_summary)
     if failed_gates:
         payload["failed_quality_gates"] = list(failed_gates)
     if error:

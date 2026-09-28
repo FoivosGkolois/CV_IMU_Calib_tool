@@ -44,3 +44,20 @@ Patch 3.2 — cycle-level dynamic validation
 - Primary candidate objective is unshifted synchronized RMSE.
 - Candidate-specific lag shifting and the legacy hand-weighted score are removed.
 - The deterministic grid remains only as a temporary search backend until Patch 4.
+
+Patch 4.1 — GP Bayesian Optimization
+- Replaces the temporary grid selector with a Gaussian-process surrogate and
+  Expected Improvement acquisition over alpha_stable, alpha_dynamic, and
+  max_accel_correction_deg only.
+- Uses a fixed, reproducible evaluation budget and seed.
+- Applies hard candidate gates instead of adding lag/jitter score weights.
+- Preserves deterministic replay and the Patch-3 train/held-out split.
+
+Patch 4.2 — independent validation and uncertainty reporting
+- Evaluates the BO-selected parameters once on held-out cycles.
+- Adds GP model uncertainty and cycle-level bootstrap confidence intervals when
+  at least two held-out cycles are available.
+- Reports marker reprojection quality explicitly without claiming angular
+  reference uncertainty before the separate known-angle validation experiment.
+- Adds same-budget random-search and budgeted-grid engineering comparators.
+- Exposes held-out RMSE/MAE/lag/improvement in the browser and YAML/report exports.

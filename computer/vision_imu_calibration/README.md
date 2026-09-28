@@ -108,9 +108,23 @@ annotated_reference.mp4
 
 (or AVI fallback).
 
-## Next patch
+## Scientific calibration state
 
-Patch 4 replaces the temporary deterministic grid search with Gaussian-process
-Bayesian Optimization while preserving the deterministic replay, Patch-3 cycle split,
-and held-out evaluation contract. Patch 4.2 adds final uncertainty/confidence
-reporting and the final browser/YAML presentation.
+The current calibration path is now complete through Patch 4:
+
+1. physics-based static calibration derives stationary gyro bias/noise, deadband,
+   and the full-extension straight-leg offset without tuning against the filter output;
+2. deterministic replay evaluates the real knee-angle filter on identical raw IMU data;
+3. a Gaussian-process surrogate with Expected Improvement performs Bayesian Optimization
+   of `alpha_stable`, `alpha_dynamic`, and `max_accel_correction_deg` only;
+4. hard candidate gates reject invalid/unresolved candidates instead of adding weighted
+   penalty terms to the primary objective;
+5. every fourth accepted dynamic cycle remains held out and is never used for selection;
+6. the final report includes GP uncertainty, held-out validation metrics, cycle-level
+   bootstrap confidence intervals when enough held-out cycles exist, and same-budget
+   random/grid engineering comparators;
+7. the browser and YAML export show the same final recommended parameters.
+
+The marker reference remains an engineering reference. Image-space pose quality is
+reported, but angular reference uncertainty is not claimed until the separate known-angle
+mechanical validation of the exact physical tag setup is performed.

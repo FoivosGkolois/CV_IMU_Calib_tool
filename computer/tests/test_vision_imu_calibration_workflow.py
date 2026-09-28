@@ -147,14 +147,21 @@ def test_analysis_exports_loadable_recommended_settings(tmp_path: Path) -> None:
     assert suggestions["final_recommended_settings"]
     report = json.loads(report_path.read_text(encoding="utf-8"))
     assert report["status"] == "VALID"
-    assert report["metrics"]["candidate_count"] > 1
+    assert report["optimization"]["backend"] == "gaussian_process_bayesian_optimization"
+    assert report["optimization"]["evaluation_budget"] == 30
+    assert report["optimization"]["search_comparison"]["same_training_evaluation_budget"] == 30
+    assert report["metrics"]["held_out_recommended"]["rmse_deg"] >= 0.0
     assert report["static_derivation"]["physical_reference_condition"] == "full_extension_180_deg"
     assert report["metrics"]["training_recommended"]["pair_count"] >= 40
     assert report["metrics"]["held_out_recommended"]["pair_count"] >= 10
     assert report["optimization"]["primary_objective"] == "training_cycle_rmse_deg"
+    assert report["uncertainty"]["gp_model"]["candidate_pool_max_std_rmse_deg"] >= 0.0
+    assert report["uncertainty"]["marker_reference"]["angular_uncertainty_quantified"] is False
     assert report["optimization"]["candidate_specific_time_shift"] is False
     assert report["optimization"]["held_out_used_for_selection"] is False
     assert report["cycle_split"]["held_out_cycle_ids"]
+    assert suggestions["optimization"]["backend"] == "gaussian_process_bayesian_optimization"
+    assert suggestions["validation"]["held_out_rmse_deg"] >= 0.0
 
 
 def test_invalid_tracking_does_not_export_recommendation(tmp_path: Path) -> None:
