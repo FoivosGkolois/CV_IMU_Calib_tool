@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import threading
 import time
 from collections import deque
@@ -9,6 +10,7 @@ from typing import Any, Mapping
 from urllib.parse import quote
 
 from .calibration_workflow import CalibrationWorkflow
+from .final_protocol import FINAL_PROTOCOL_VERSION, PROTOCOL_SUMMARY
 from .camera_calibration import CheckerboardCalibrationSession
 from .camera_source import OpenCvCameraSource
 from .imu_filter import (
@@ -19,8 +21,10 @@ from .imu_filter import (
 from .imu_serial import IMUCAL_BAUD_RATE, SerialImuSource, list_serial_ports
 from .marker_reference import AprilTagReference, MarkerReferenceResult
 from .overlay import draw_marker_overlay
+from .provenance import load_runtime_provenance
 from .recorder import AnnotatedVideoRecorder
 from .reference_setup import ReferenceSetupStore
+from .reference_validation import KnownAngleReferenceValidationSession
 from .tuning import FrameRotation, RuntimeTuning
 
 
@@ -126,7 +130,9 @@ class VisionRuntime:
         self.recorder = AnnotatedVideoRecorder(self.recording_root)
         self.calibration = CalibrationWorkflow(self.calibration_root)
         self.camera_calibration = CheckerboardCalibrationSession()
+        self.reference_validation = KnownAngleReferenceValidationSession()
         self.reference_setup_store = ReferenceSetupStore(self.reference_setup_root)
+        self._provenance = load_runtime_provenance()
         self._reference_setup_status: dict[str, Any] = {
             "persistent": True,
             "persistent_state": "NOT_LOADED",
@@ -135,8 +141,9 @@ class VisionRuntime:
             "log_path": str(self.reference_setup_store.log_path),
             "saved_utc": "",
             "persistent_rms_reprojection_error_px": None,
+            "marker_reference_validation": {},
         }
-        # Patch 3: physics-based static calibration + cycle-level held-out validation are active.
+        # Final scientific calibration workflow is active.
         self._calibration_workflow_ready = True
         self._calibration_timer_cancel: threading.Event | None = None
         self._calibration_timer_thread: threading.Thread | None = None
@@ -320,6 +327,8 @@ class VisionRuntime:
         }
 
     def update_camera_profile(self, profile_name: str) -> dict[str, Any]:
+        if self.reference_validation.active:
+            raise RuntimeError("Cancel known-angle reference validation before changing the camera profile")
         if self.camera_calibration.status()["active"]:
             raise RuntimeError("Cancel checkerboard camera calibration before changing the camera profile")
         if self._calibration_locked():
@@ -395,6 +404,8 @@ class VisionRuntime:
         return self.camera_status()
 
     def start_camera_calibration(self) -> dict[str, Any]:
+        if self.reference_validation.active:
+            raise RuntimeError("Cancel known-angle reference validation before camera calibration")
         if self._calibration_locked():
             raise RuntimeError("Stop the IMU calibration test before camera calibration")
         if self.recorder.status().active:
@@ -406,6 +417,60 @@ class VisionRuntime:
 
     def cancel_camera_calibration(self) -> dict[str, Any]:
         return self.camera_calibration.cancel()
+
+    def reference_validation_status(self) -> dict[str, Any]:
+        live = self.reference_validation.status()
+        stored = self.reference_setup_store.marker_reference_validation()
+        if live.get("state") == "IDLE" and stored:
+            metrics = stored.get("metrics") if isinstance(stored, Mapping) else None
+            passed = bool(isinstance(metrics, Mapping) and metrics.get("passed"))
+            live = {
+                **live,
+                "state": "PERSISTED_PASSED" if passed else "PERSISTED_FAILED",
+                "message": (
+                    "Known-angle reference validation is saved and passed."
+                    if passed
+                    else "The saved known-angle validation did not pass; repeat it before dynamic calibration."
+                ),
+                "result": stored,
+                "progress": 1.0,
+            }
+        live["persisted"] = stored
+        live["persisted_passed"] = self._reference_validation_passed(stored)
+        return live
+
+    @staticmethod
+    def _reference_validation_passed(result: Mapping[str, Any] | None) -> bool:
+        if not isinstance(result, Mapping):
+            return False
+        metrics = result.get("metrics")
+        return bool(isinstance(metrics, Mapping) and metrics.get("passed") is True)
+
+    def start_reference_validation(self) -> dict[str, Any]:
+        if self.camera_calibration.status()["active"]:
+            raise RuntimeError("Finish or cancel checkerboard camera calibration first")
+        if self._calibration_locked() or self.recorder.status().active:
+            raise RuntimeError("Stop recording/calibration before reference validation")
+        if self._reference_setup_status.get("persistent_state") != "LOADED":
+            raise RuntimeError("Complete and save checkerboard camera calibration first")
+        return self.reference_validation.start()
+
+    def capture_reference_validation(self) -> dict[str, Any]:
+        if not self.reference_validation.active:
+            raise RuntimeError("Start known-angle reference validation first")
+        status = self.status()
+        if not status.get("tracking_valid"):
+            raise RuntimeError("Both tags must be visible and Reference must be VALID")
+        rows = self.acquisition_history(seconds=2.0, max_points=120)
+        result = self.reference_validation.capture(rows)
+        completed = result.get("result")
+        if isinstance(completed, Mapping):
+            self.reference_setup_store.save_marker_reference_validation(completed)
+            self._load_persistent_reference_setup()
+        return self.reference_validation_status()
+
+    def cancel_reference_validation(self) -> dict[str, Any]:
+        return self.reference_validation.cancel()
 
     def _camera_profile_values(self) -> dict[str, float | int]:
         profile_method = getattr(self.camera, "profile", None)
@@ -447,6 +512,7 @@ class VisionRuntime:
             configure_camera(load.calibration)
         elif callable(clear_camera):
             clear_camera()
+        stored_validation = self.reference_setup_store.marker_reference_validation()
         self._reference_setup_status = {
             "persistent": True,
             "persistent_state": load.state,
@@ -455,6 +521,8 @@ class VisionRuntime:
             "log_path": str(self.reference_setup_store.log_path),
             "saved_utc": load.saved_utc,
             "persistent_rms_reprojection_error_px": load.rms_reprojection_error_px,
+            "marker_reference_validation": stored_validation,
+            "reference_setup_sha256": self.reference_setup_store.current_sha256(),
         }
 
     def _persist_reference_setup(self) -> None:
@@ -481,6 +549,7 @@ class VisionRuntime:
                 "log_path": str(self.reference_setup_store.log_path),
                 "saved_utc": "",
                 "persistent_rms_reprojection_error_px": result.rms_reprojection_error_px,
+                "marker_reference_validation": {},
             }
             return
         self._reference_setup_status = {
@@ -604,6 +673,12 @@ class VisionRuntime:
         camera_calibration_payload.update(self._reference_setup_status)
         camera_calibration_payload["persistent"] = True
         payload["camera_calibration"] = camera_calibration_payload
+        payload["reference_validation"] = self.reference_validation_status()
+        payload["protocol"] = {
+            "version": FINAL_PROTOCOL_VERSION,
+            "summary": PROTOCOL_SUMMARY,
+        }
+        payload["provenance"] = self._provenance
         calibration_payload = asdict(self.calibration.status())
         calibration_payload.update(self._calibration_export_payload(calibration_payload))
         # Expose whether the scientific calibration workflow is enabled.
@@ -662,6 +737,8 @@ class VisionRuntime:
             return self._tuning.to_dict()
 
     def update_tuning(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        if self.reference_validation.active:
+            raise RuntimeError("Cancel known-angle reference validation before changing camera presentation settings")
         if self.camera_calibration.status()["active"]:
             raise RuntimeError("Cancel checkerboard camera calibration before changing camera presentation settings")
         if self._calibration_locked():
@@ -686,6 +763,8 @@ class VisionRuntime:
         return f"{port}@{baud_rate}" if port and baud_rate > 0 else port
 
     def start_recording(self) -> dict[str, Any]:
+        if self.reference_validation.active:
+            raise RuntimeError("Finish or cancel known-angle reference validation before recording")
         if self.camera_calibration.status()["active"]:
             raise RuntimeError("Finish or cancel checkerboard camera calibration before recording")
         if self._calibration_locked():
@@ -717,15 +796,55 @@ class VisionRuntime:
                     raise
         return self.status()["recording"]
 
+    def _write_calibration_run_provenance(
+        self,
+        run_directory: Path,
+        *,
+        base_parameters: KneeAngleFilterParameters,
+    ) -> None:
+        snapshot = self.reference_setup_store.snapshot_to(
+            run_directory / "reference_setup_snapshot.yaml"
+        )
+        payload = {
+            "schema_version": 1,
+            "protocol_version": FINAL_PROTOCOL_VERSION,
+            "protocol": PROTOCOL_SUMMARY,
+            "runtime_provenance": self._provenance,
+            "reference_setup_snapshot": snapshot,
+            "active_reference_setup_sha256": self.reference_setup_store.current_sha256(),
+            "known_angle_reference_validation": self.reference_setup_store.marker_reference_validation(),
+            "camera_source": self.camera.description,
+            "imu_filter_implementation_id": self._imu_filter.implementation_id,
+            "baseline_filter_parameters": base_parameters.to_dict(),
+        }
+        (run_directory / "RUN_PROVENANCE.json").write_text(
+            json.dumps(payload, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
+    def _assert_calibration_run_provenance_current(self, run_directory: Path) -> None:
+        path = run_directory / "RUN_PROVENANCE.json"
+        if not path.is_file():
+            raise RuntimeError("Calibration run provenance is missing; repeat the static stage")
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            raise RuntimeError("Calibration run provenance is unreadable; repeat the static stage") from exc
+        expected = str(payload.get("active_reference_setup_sha256", "") or "")
+        current = self.reference_setup_store.current_sha256()
+        if not expected or current != expected:
+            raise RuntimeError(
+                "Reference setup changed after the static stage; repeat the static stage before dynamic calibration"
+            )
+
     def start_calibration_test(self, test_type: str) -> dict[str, Any]:
         with self._calibration_action_lock:
+            if self.reference_validation.active:
+                raise RuntimeError("Finish or cancel known-angle reference validation first")
             if self.camera_calibration.status()["active"]:
                 raise RuntimeError("Finish or cancel checkerboard camera calibration first")
             if not self._calibration_workflow_ready:
-                raise RuntimeError(
-                    "Scientific calibration workflow remains locked until Patch 3 replaces "
-                    "the legacy calibration analysis. Reference recording is still available."
-                )
+                raise RuntimeError("Scientific calibration workflow is unavailable in this build.")
             if self.recorder.status().active:
                 raise RuntimeError("Stop the current recording before starting calibration")
             status = self.status()
@@ -735,11 +854,24 @@ class VisionRuntime:
             if not imu.get("thigh_ready") or not imu.get("shank_ready"):
                 raise RuntimeError("Both thigh and shank IMUs must be READY")
             normalized_test_type = str(test_type or "").strip().lower()
+            camera_calibration = status.get("camera_calibration", {})
+            reference_validation = status.get("reference_validation", {})
+            if camera_calibration.get("persistent_state") != "LOADED":
+                raise RuntimeError(
+                    "Complete the persistent checkerboard camera setup before IMU calibration"
+                )
+            if not reference_validation.get("persisted_passed"):
+                raise RuntimeError(
+                    "Complete and pass the one-time known-angle tag-reference validation before IMU calibration"
+                )
             if normalized_test_type == "dynamic" and not status.get("tracking_valid"):
                 raise RuntimeError(
                     "Tag reference must be VALID before the dynamic test starts. "
-                    "Complete the persistent camera/reference setup first."
+                    "Keep both tags visible in the validated camera setup."
                 )
+            if normalized_test_type == "dynamic":
+                existing_run = Path(self.calibration.status().run_directory)
+                self._assert_calibration_run_provenance_current(existing_run)
 
             with self._imu_filter_lock:
                 base_parameters = self._imu_filter.parameters
@@ -756,6 +888,14 @@ class VisionRuntime:
             imu_description = self._format_imu_description(imu)
             tuning["imu_filter"] = self.imu_estimator_status()
             run_directory = Path(prepared["run_directory"])
+            if normalized_test_type == "static":
+                try:
+                    self._write_calibration_run_provenance(
+                        run_directory, base_parameters=base_parameters
+                    )
+                except Exception as exc:
+                    self.calibration.fail(f"Could not freeze calibration provenance: {exc}")
+                    raise
             try:
                 self.recorder.request_start(
                     settings=tuning,
@@ -767,6 +907,10 @@ class VisionRuntime:
                         "recording_purpose": "marker_imu_filter_calibration",
                         "calibration_test_type": prepared["test_type"],
                         "automatic_duration_s": prepared["duration_s"],
+                        "protocol_version": FINAL_PROTOCOL_VERSION,
+                        "protocol": PROTOCOL_SUMMARY,
+                        "runtime_provenance": self._provenance,
+                        "reference_setup_sha256": self.reference_setup_store.current_sha256(),
                     },
                 )
             except Exception as exc:

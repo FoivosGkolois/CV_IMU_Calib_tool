@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -102,6 +103,7 @@ class ReferenceSetupStore:
                 "marker_reference_known_angle_validation": "not_performed",
             },
         }
+        payload["reference_setup_id"] = self._payload_digest(payload)
         self._atomic_write_yaml(payload)
         self._append_log(
             f"{saved_utc} | CAMERA_CALIBRATION_SAVED | "
@@ -191,6 +193,71 @@ class ReferenceSetupStore:
                 state="INVALID",
                 message=f"Persistent camera calibration is invalid: {exc}",
             )
+
+    def load_payload(self) -> dict[str, Any]:
+        if not self.yaml_path.is_file():
+            return {}
+        raw = yaml.safe_load(self.yaml_path.read_text(encoding="utf-8"))
+        return dict(raw) if isinstance(raw, Mapping) else {}
+
+    def save_marker_reference_validation(self, result: Mapping[str, Any]) -> dict[str, Any]:
+        payload = self.load_payload()
+        if not payload:
+            raise RuntimeError("Camera calibration must be saved before reference validation")
+        validation = payload.get("validation")
+        if not isinstance(validation, Mapping):
+            validation = {}
+        validation_payload = dict(validation)
+        validation_payload["marker_reference_known_angle_validation"] = dict(result)
+        payload["validation"] = validation_payload
+        payload["reference_setup_id"] = self._payload_digest(payload)
+        self._atomic_write_yaml(payload)
+        metrics = result.get("metrics") if isinstance(result, Mapping) else None
+        rmse = metrics.get("rmse_deg") if isinstance(metrics, Mapping) else None
+        repeatability = (
+            metrics.get("max_repeatability_sd_deg") if isinstance(metrics, Mapping) else None
+        )
+        self._append_log(
+            f"{result.get('validated_utc', '')} | MARKER_REFERENCE_VALIDATION_"
+            f"{str(result.get('status', 'unknown')).upper()} | RMSE={rmse}deg | "
+            f"repeatability_sd_max={repeatability}deg"
+        )
+        return payload
+
+    def marker_reference_validation(self) -> dict[str, Any]:
+        payload = self.load_payload()
+        validation = payload.get("validation") if isinstance(payload, Mapping) else None
+        stored = (
+            validation.get("marker_reference_known_angle_validation")
+            if isinstance(validation, Mapping)
+            else None
+        )
+        return dict(stored) if isinstance(stored, Mapping) else {}
+
+    def current_sha256(self) -> str:
+        if not self.yaml_path.is_file():
+            return ""
+        return hashlib.sha256(self.yaml_path.read_bytes()).hexdigest()
+
+    def snapshot_to(self, destination: str | Path) -> dict[str, Any]:
+        if not self.yaml_path.is_file():
+            raise FileNotFoundError("Persistent reference_setup.yaml does not exist")
+        target = Path(destination).expanduser().resolve()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        data = self.yaml_path.read_bytes()
+        target.write_bytes(data)
+        return {
+            "path": target.name,
+            "sha256": hashlib.sha256(data).hexdigest(),
+            "bytes": len(data),
+        }
+
+    @staticmethod
+    def _payload_digest(payload: Mapping[str, Any]) -> str:
+        canonical_payload = dict(payload)
+        canonical_payload.pop("reference_setup_id", None)
+        canonical = yaml.safe_dump(canonical_payload, sort_keys=True, allow_unicode=True).encode("utf-8")
+        return hashlib.sha256(canonical).hexdigest()
 
     def _atomic_write_yaml(self, payload: Mapping[str, Any]) -> None:
         self.root.mkdir(parents=True, exist_ok=True)

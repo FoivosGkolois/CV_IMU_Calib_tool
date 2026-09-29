@@ -65,15 +65,29 @@ def _raw_row(index: int, *, host_ns: int, flexion_deg: float, flexion_rate_dps: 
     }
 
 
+def _dynamic_motion(t: float) -> tuple[float, float]:
+    # Final frozen protocol fixture: 4 slow + 4 normal + 4 brisk complete cycles.
+    periods = [4.0] * 4 + [3.0] * 4 + [2.0] * 4
+    elapsed = 0.0
+    for period in periods:
+        if t <= elapsed + period:
+            phase = max(0.0, min(1.0, (t - elapsed) / period))
+            omega = 2.0 * math.pi / period
+            flexion = 40.0 - 30.0 * math.cos(2.0 * math.pi * phase)
+            rate = 30.0 * omega * math.sin(2.0 * math.pi * phase)
+            return flexion, rate
+        elapsed += period
+    return 10.0, 0.0
+
+
 def _archive(path: Path, *, dynamic: bool, tracking_valid: bool = True) -> Path:
-    count = 1300 if dynamic else 400
+    count = 3701 if dynamic else 400
     start_ns = 8_000_000_000
     raw_rows: list[dict[str, object]] = []
     flexions: list[float] = []
     for index in range(count):
         t = index * 0.01
-        flexion = 40.0 + 30.0 * math.sin(2.0 * math.pi * t / 2.5) if dynamic else 0.0
-        rate = 30.0 * (2.0 * math.pi / 2.5) * math.cos(2.0 * math.pi * t / 2.5) if dynamic else 0.0
+        flexion, rate = _dynamic_motion(t) if dynamic else (0.0, 0.0)
         flexions.append(flexion)
         raw_rows.append(
             _raw_row(index, host_ns=start_ns + index * 10_000_000, flexion_deg=flexion, flexion_rate_dps=rate)
@@ -302,7 +316,7 @@ def test_static_derivation_uses_physical_full_extension_not_visual_reference(tmp
     assert result["marker_reference_sanity"]["used_for_static_derivation"] is False
 
 
-def test_dynamic_cycles_are_split_deterministically_with_every_fourth_held_out(
+def test_dynamic_cycles_follow_frozen_12_cycle_protocol_and_balanced_holdout(
     tmp_path: Path,
 ) -> None:
     archive = _archive(tmp_path / "dynamic_cycles.zip", dynamic=True)
@@ -310,10 +324,9 @@ def test_dynamic_cycles_are_split_deterministically_with_every_fourth_held_out(
     cycles = _detect_dynamic_cycles(data.sync_rows)
     training, held_out = _split_dynamic_cycles(cycles)
 
-    assert len(cycles) >= 4
-    assert [cycle["cycle_id"] for cycle in held_out] == [
-        cycle["cycle_id"] for cycle in cycles if cycle["cycle_id"] % 4 == 0
-    ]
+    assert len(cycles) >= 12
+    assert [cycle["cycle_id"] for cycle in held_out] == [4, 8, 12]
+    assert len(training) == 9
     assert set(cycle["cycle_id"] for cycle in training).isdisjoint(
         cycle["cycle_id"] for cycle in held_out
     )

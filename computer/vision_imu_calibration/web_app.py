@@ -184,6 +184,19 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
     <div id="cameraCalibrationQuality" class="note">15 diverse views · 25 mm squares · persistent after quality acceptance</div>
   </div>
 
+  <div class="card wide">
+    <div class="label">One-time tag reference validation</div>
+    <div id="referenceValidationState" class="value small">NOT PERFORMED</div>
+    <div id="referenceValidationMessage" class="note">After camera calibration, mount Tag 0 and Tag 1 on a rigid hinged goniometer/fixture.</div>
+    <div class="progress-track"><div id="referenceValidationProgress" class="progress-fill"></div></div>
+    <div class="button-grid">
+      <button id="startReferenceValidation" class="primary" onclick="referenceValidationStart()">Start known-angle validation</button>
+      <button id="captureReferenceValidation" class="primary" onclick="referenceValidationCapture()">Capture current angle</button>
+      <button id="cancelReferenceValidation" class="secondary" onclick="referenceValidationCancel()">Cancel</button>
+    </div>
+    <div id="referenceValidationQuality" class="note">Targets: 180°, 150°, 120°, 90° · 5 captures each · one-time persistent result</div>
+  </div>
+
   <div class="card">
     <div class="label">Camera profile</div>
     <select id="cameraProfile" style="margin-top:8px"><option value="fast">Fast · 640×480</option><option value="quality">Quality · 1280×720</option></select>
@@ -220,7 +233,7 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
   </details>
 </aside>
 </main>
-<footer>Validated two-tag geometric reference · physics-based static calibration · GP Bayesian Optimization · held-out validation.</footer>
+<footer>Final protocol: validated two-tag geometric reference · physics-based static calibration · 12-cycle multi-speed tuning · GP Bayesian Optimization · held-out validation.</footer>
 </div>
 <div id="calibrationModal" class="modal-backdrop" hidden>
   <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="calibrationModalTitle">
@@ -367,6 +380,19 @@ async function cameraCalibrationCancel(){
   const r=await fetch('/api/reference/camera-calibration/cancel',{method:'POST'}); const body=await r.json();
   cameraCalibrationMessage.textContent=r.ok?(body.message||'Checkerboard calibration cancelled.'):('Cancel failed: '+(body.error||'unknown error'));
 }
+async function referenceValidationStart(){
+  const r=await fetch('/api/reference/known-angle-validation/start',{method:'POST'}); const body=await r.json();
+  referenceValidationMessage.textContent=r.ok?(body.message||'Known-angle validation started.'):('Start failed: '+(body.error||'unknown error'));
+}
+async function referenceValidationCapture(){
+  referenceValidationMessage.textContent='Capturing the last second of stable tag data…';
+  const r=await fetch('/api/reference/known-angle-validation/capture',{method:'POST'}); const body=await r.json();
+  referenceValidationMessage.textContent=r.ok?(body.message||'Capture accepted.'):('Capture failed: '+(body.error||'unknown error'));
+}
+async function referenceValidationCancel(){
+  const r=await fetch('/api/reference/known-angle-validation/cancel',{method:'POST'}); const body=await r.json();
+  referenceValidationMessage.textContent=r.ok?(body.message||'Known-angle validation cancelled.'):('Cancel failed: '+(body.error||'unknown error'));
+}
 
 const CALIBRATION_GUIDANCE={
   static:{
@@ -380,11 +406,11 @@ const CALIBRATION_GUIDANCE={
   },
   dynamic:{
     title:'Dynamic calibration test',
-    intro:'The tool records for 25 seconds and then generates the recommended settings.',
+    intro:'The tool records for up to 60 seconds. The final protocol uses exactly 12 accepted complete cycles.',
     steps:[
       'Keep exactly the same IMU, tag, and camera mounting used for the static test.',
       'Keep both AprilTags visible and wait for Reference VALID.',
-      'Perform repeated complete flexion–extension cycles, mixing slow, normal and somewhat faster movements. Aim for at least 6 cycles.'
+      'Perform 4 deliberately slow complete flexion–extension cycles, then 4 comfortable/normal cycles, then 4 brisk cycles. The tool uses 9 for tuning and keeps one from each speed block unseen for the final check.'
     ]
   }
 };
@@ -578,7 +604,20 @@ async function refresh(){
     const cameraCalibrationBusy=Boolean(camCal.active);
     startCameraCalibration.disabled=cameraCalibrationBusy||Boolean((s.recording||{}).active)||calibrationLocked||!['CAMERA_PREVIEW','RUNNING','REFERENCE_FAILED'].includes(s.state);
     cancelCameraCalibration.disabled=!cameraCalibrationBusy;
-    applyCameraProfile.disabled=Boolean((s.recording||{}).active)||calibrationLocked||cameraCalibrationBusy||camera.reconfigurable===false||!['CAMERA_PREVIEW','RUNNING','REFERENCE_FAILED'].includes(s.state);
+    const refVal=s.reference_validation||{};
+    const refValState=String(refVal.state||'IDLE');
+    referenceValidationState.textContent=refValState.replaceAll('_',' ');
+    referenceValidationState.className='value small '+(refVal.persisted_passed?'ok':(refValState.includes('FAILED')?'bad':''));
+    referenceValidationMessage.textContent=refVal.message||'Run once after camera calibration using the rigid known-angle fixture.';
+    referenceValidationProgress.style.width=(100*Number(refVal.progress||0)).toFixed(1)+'%';
+    const currentTarget=refVal.current_target_deg==null?'—':Number(refVal.current_target_deg).toFixed(0)+'°';
+    const refMetrics=(refVal.result||{}).metrics||{};
+    const metricText=refMetrics.rmse_deg==null?'RMSE —':`RMSE ${Number(refMetrics.rmse_deg).toFixed(2)}° · repeatability ${Number(refMetrics.max_repeatability_sd_deg).toFixed(2)}°`;
+    referenceValidationQuality.textContent=`Target ${currentTarget} · ${Number(refVal.completed_captures||0)}/${Number(refVal.required_captures||20)} captures · ${metricText}`;
+    startReferenceValidation.disabled=Boolean(refVal.active)||cameraCalibrationBusy||Boolean((s.recording||{}).active)||calibrationLocked||camCal.persistent_state!=='LOADED';
+    captureReferenceValidation.disabled=!Boolean(refVal.active)||!Boolean(s.tracking_valid);
+    cancelReferenceValidation.disabled=!Boolean(refVal.active);
+    applyCameraProfile.disabled=Boolean((s.recording||{}).active)||calibrationLocked||cameraCalibrationBusy||Boolean(refVal.active)||camera.reconfigurable===false||!['CAMERA_PREVIEW','RUNNING','REFERENCE_FAILED'].includes(s.state);
     const cal=s.calibration||{};
     calibrationState.textContent=String(cal.state||'IDLE').replaceAll('_',' ');
     calibrationState.className='value small '+(cal.valid?'ok':(cal.state==='FAILED'||cal.state==='INVALID'?'bad':''));
@@ -588,8 +627,9 @@ async function refresh(){
     updateImuRecommendations(cal);
     const calibrationBusy=Boolean(cal.active)||String(cal.state||'').startsWith('ANALYZING');
     const imuReady=Boolean(cal.workflow_ready)&&Boolean(imu.connected)&&Boolean(imu.thigh_ready&&imu.shank_ready);
-    const dynamicReady=imuReady&&Boolean(s.tracking_valid);
-    startStaticTest.disabled=calibrationBusy||Boolean((s.recording||{}).active)||!imuReady||cal.state==='AWAITING_DYNAMIC';
+    const setupReady=camCal.persistent_state==='LOADED'&&Boolean(refVal.persisted_passed);
+    const dynamicReady=imuReady&&setupReady&&Boolean(s.tracking_valid);
+    startStaticTest.disabled=calibrationBusy||Boolean((s.recording||{}).active)||!imuReady||!setupReady||cal.state==='AWAITING_DYNAMIC';
     startStaticTest.textContent=(cal.state==='COMPLETE'||cal.state==='FAILED')?'Start new calibration':'Start calibration';
     startDynamicTest.disabled=calibrationBusy||Boolean((s.recording||{}).active)||!dynamicReady||!Boolean(cal.static_suggestion&&Object.keys(cal.static_suggestion).length)||!['AWAITING_DYNAMIC','INVALID'].includes(cal.state);
     stopCalibrationTestButton.disabled=!Boolean(cal.active);
@@ -777,6 +817,27 @@ def create_app(runtime: VisionRuntime) -> Any:
     def camera_calibration_cancel() -> Any:
         try:
             return jsonify(runtime.cancel_camera_calibration())
+        except RuntimeError as exc:
+            return jsonify({"error": str(exc)}), 409
+
+    @app.post("/api/reference/known-angle-validation/start")
+    def reference_validation_start() -> Any:
+        try:
+            return jsonify(runtime.start_reference_validation())
+        except RuntimeError as exc:
+            return jsonify({"error": str(exc)}), 409
+
+    @app.post("/api/reference/known-angle-validation/capture")
+    def reference_validation_capture() -> Any:
+        try:
+            return jsonify(runtime.capture_reference_validation())
+        except RuntimeError as exc:
+            return jsonify({"error": str(exc)}), 409
+
+    @app.post("/api/reference/known-angle-validation/cancel")
+    def reference_validation_cancel() -> Any:
+        try:
+            return jsonify(runtime.cancel_reference_validation())
         except RuntimeError as exc:
             return jsonify({"error": str(exc)}), 409
 

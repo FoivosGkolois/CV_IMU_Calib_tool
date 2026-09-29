@@ -61,6 +61,11 @@ def _interface_ipv4_addresses() -> list[tuple[str, str]]:
                 continue
             if address.startswith("127.") or address.startswith("169.254."):
                 continue
+            # App Lab runs Python inside a container. Its default 172.16/12
+            # address is not the UNO Q address reachable from the PC browser.
+            first, second = (int(part) for part in address.split(".")[:2])
+            if first == 172 and 16 <= second <= 31:
+                continue
             addresses.append((interface_name, address))
 
     if not addresses:
@@ -76,6 +81,9 @@ def _interface_ipv4_addresses() -> list[tuple[str, str]]:
         for info in infos:
             address = str(info[4][0])
             if address.startswith("127.") or address.startswith("169.254."):
+                continue
+            first, second = (int(part) for part in address.split(".")[:2])
+            if first == 172 and 16 <= second <= 31:
                 continue
             addresses.append(("network", address))
 
@@ -157,7 +165,7 @@ def monitor_web_runtime(server_thread: threading.Thread) -> None:
             print(f"  {interface_name}: {url}", flush=True)
     else:
         print(
-            "[VISION-IMU] Board IPv4 address not resolved yet; App Lab can show the board IP.",
+            "[VISION-IMU] Browser address: http://<UNO-Q-IP>:8765 (use the board IP shown by App Lab/SSH).",
             flush=True,
         )
 
@@ -167,7 +175,7 @@ def monitor_web_runtime(server_thread: threading.Thread) -> None:
             current_urls = _browser_urls() or urls
             print("\n[VISION-IMU] WEB GUI READY", flush=True)
             if current_urls:
-                print("[VISION-IMU] COPY/PASTE ONE OF THESE LINKS:", flush=True)
+                print("[VISION-IMU] COPY/PASTE THE LINK THAT MATCHES THE UNO Q IP SHOWN BY APP LAB:", flush=True)
                 for interface_name, url in current_urls:
                     print(f"  {interface_name}: {url}", flush=True)
             else:

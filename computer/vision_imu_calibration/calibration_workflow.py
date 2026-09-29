@@ -22,15 +22,22 @@ from .bayesian_optimizer import (
     parameter_bounds_payload,
     sample_random_parameters,
 )
+from .final_protocol import (
+    DYNAMIC_PROTOCOL_CYCLES,
+    DYNAMIC_SPEED_BLOCK_SIZE,
+    DYNAMIC_SPEED_BLOCKS,
+    DYNAMIC_TEST_DURATION_S,
+    FINAL_PROTOCOL_VERSION,
+    HELD_OUT_CYCLE_INDICES,
+    PROTOCOL_SUMMARY,
+    STATIC_TEST_DURATION_S,
+)
 from .imu_filter import KneeAngleEstimate, KneeAngleFilterMirror, KneeAngleFilterParameters
 from .imu_serial import ImuCalibrationSample
 
-STATIC_TEST_DURATION_S = 12.0
-DYNAMIC_TEST_DURATION_S = 25.0
 MAX_SYNC_ERROR_MS = 20.0
 MIN_VISUAL_VALID_FRACTION = 0.70
-MIN_ACCEPTED_DYNAMIC_CYCLES = 4
-HELD_OUT_CYCLE_STRIDE = 4
+MIN_ACCEPTED_DYNAMIC_CYCLES = DYNAMIC_PROTOCOL_CYCLES
 SUGGESTIONS_FILENAME = "imu_filter_suggestions.yaml"
 STATIC_ARCHIVE_FILENAME = "static_trial.zip"
 DYNAMIC_ARCHIVE_FILENAME = "dynamic_trial.zip"
@@ -161,7 +168,10 @@ class CalibrationWorkflow:
             self._message = (
                 "Keep the leg completely still until the static test finishes."
                 if test == "static"
-                else "Perform slow, smooth flexion-extension cycles while keeping the leg visible."
+                else (
+                    "Perform 12 complete flexion-extension cycles in order: "
+                    "4 slow, 4 normal, then 4 brisk, keeping both tags visible."
+                )
             )
             return {
                 "test_type": test,
@@ -458,16 +468,20 @@ def analyze_static_calibration_stage(
     report_path = output_dir / "calibration_report.json"
     recommendation_path = output_dir / SUGGESTIONS_FILENAME
     run_id = output_dir.name
+    run_provenance = _load_run_provenance(output_dir)
 
     if failed_gates:
         report = {
-            "schema_version": "vision_imu_calibration_report_v2",
+            "schema_version": "vision_imu_calibration_report_v4",
+            "protocol_version": FINAL_PROTOCOL_VERSION,
+            "protocol": PROTOCOL_SUMMARY,
             "generated_at": datetime.now().astimezone().isoformat(),
             "status": "INVALID_STATIC",
             "method": "physics_based_static_calibration",
             "quality_gates": gates,
             "failed_gates": failed_gates,
             "source_archives": {"static": static_archive.name, "dynamic": None},
+            "provenance": run_provenance,
             "baseline_parameters": _parameter_payload(base_parameters),
             "message": "Static data did not pass the quality gates. Repeat the static stage.",
         }
@@ -494,12 +508,15 @@ def analyze_static_calibration_stage(
     static_parameters = static_result["parameters"]
     static_suggestion = _parameter_payload(static_parameters)
     report = {
-        "schema_version": "vision_imu_calibration_report_v2",
+        "schema_version": "vision_imu_calibration_report_v4",
+        "protocol_version": FINAL_PROTOCOL_VERSION,
+        "protocol": PROTOCOL_SUMMARY,
         "generated_at": datetime.now().astimezone().isoformat(),
         "status": "AWAITING_DYNAMIC",
         "method": "physics_based_static_calibration",
         "quality_gates": gates,
         "source_archives": {"static": static_archive.name, "dynamic": None},
+        "provenance": run_provenance,
         "baseline_parameters": _parameter_payload(base_parameters),
         "static_suggestion": static_suggestion,
         "static_derivation": {
@@ -553,16 +570,20 @@ def analyze_calibration_run(
         static_result = _derive_static_parameters(static_data, base_parameters)
         static_suggestion = _parameter_payload(static_result["parameters"])
 
-    cycles = _detect_dynamic_cycles(dynamic_data.sync_rows)
+    detected_cycles = _detect_dynamic_cycles(dynamic_data.sync_rows)
+    cycles = _protocol_dynamic_cycles(detected_cycles)
     train_cycles, validation_cycles = _split_dynamic_cycles(cycles)
     train_rows = _rows_for_cycles(dynamic_data.sync_rows, train_cycles)
     validation_rows = _rows_for_cycles(dynamic_data.sync_rows, validation_cycles)
+    speed_blocks = _speed_block_summary(cycles)
 
     gates = _quality_gates(
         static_data,
         dynamic_data,
         base_parameters,
         cycles=cycles,
+        detected_cycle_count=len(detected_cycles),
+        speed_blocks=speed_blocks,
         train_rows=train_rows,
         validation_rows=validation_rows,
     )
@@ -571,20 +592,29 @@ def analyze_calibration_run(
     overview_path = output_dir / "calibration_overview.png"
     recommendation_path = output_dir / SUGGESTIONS_FILENAME
     run_id = output_dir.name
+    run_provenance = _load_run_provenance(output_dir)
+    known_angle_validation = run_provenance.get("known_angle_reference_validation", {})
 
     split_payload = {
-        "rule": "every_4th_accepted_cycle_held_out",
-        "accepted_cycle_count": len(cycles),
+        "protocol_version": FINAL_PROTOCOL_VERSION,
+        "protocol": PROTOCOL_SUMMARY,
+        "rule": "12 ordered cycles: 4 slow + 4 normal + 4 brisk; cycles 4, 8 and 12 held out",
+        "detected_cycle_count": len(detected_cycles),
+        "analysis_cycle_count": len(cycles),
+        "ignored_extra_cycle_count": max(0, len(detected_cycles) - len(cycles)),
         "training_cycle_ids": [cycle["cycle_id"] for cycle in train_cycles],
         "held_out_cycle_ids": [cycle["cycle_id"] for cycle in validation_cycles],
         "training_reference_rows": len(train_rows),
         "held_out_reference_rows": len(validation_rows),
+        "speed_blocks": speed_blocks,
         "cycles": cycles,
     }
 
     if failed_gates:
         report = {
-            "schema_version": "vision_imu_calibration_report_v3",
+            "schema_version": "vision_imu_calibration_report_v4",
+            "protocol_version": FINAL_PROTOCOL_VERSION,
+            "protocol": PROTOCOL_SUMMARY,
             "generated_at": datetime.now().astimezone().isoformat(),
             "status": "INVALID",
             "method": "physics_static_plus_gp_bayesian_optimization_with_held_out_validation",
@@ -595,6 +625,7 @@ def analyze_calibration_run(
                 "static": static_archive.name,
                 "dynamic": dynamic_archive.name,
             },
+            "provenance": run_provenance,
             "baseline_parameters": _parameter_payload(base_parameters),
             "static_suggestion": static_suggestion or None,
             "message": "Test data did not pass the quality gates. No settings were recommended.",
@@ -688,7 +719,9 @@ def analyze_calibration_run(
         recommended_parameters=recommended_parameters,
         validation_cycles=validation_cycles,
     )
-    reference_uncertainty = _reference_uncertainty_summary(validation_rows)
+    reference_uncertainty = _reference_uncertainty_summary(
+        validation_rows, known_angle_validation=known_angle_validation
+    )
 
     search_comparison: dict[str, Any] = {
         "same_training_evaluation_budget": BO_EVALUATION_BUDGET,
@@ -775,16 +808,26 @@ def analyze_calibration_run(
     }
 
     report = {
-        "schema_version": "vision_imu_calibration_report_v3",
+        "schema_version": "vision_imu_calibration_report_v4",
+        "protocol_version": FINAL_PROTOCOL_VERSION,
+        "protocol": PROTOCOL_SUMMARY,
         "generated_at": datetime.now().astimezone().isoformat(),
         "status": "VALID",
         "method": "physics_static_plus_gp_bayesian_optimization_with_held_out_validation",
         "reference": {
-            "type": "marker_based_geometric_reference",
-            "statement": (
-                "Dynamic performance is evaluated against the synchronized calibrated "
-                "marker reference. Held-out cycles are excluded from parameter selection."
+            "type": (
+                "validated_marker_based_geometric_reference"
+                if _known_angle_validation_passed(known_angle_validation)
+                else "marker_based_geometric_reference"
             ),
+            "statement": (
+                "Dynamic performance is evaluated against the synchronized camera-calibrated "
+                "marker reference whose passed known-angle validation is frozen in the run provenance. "
+                "Held-out cycles are excluded from parameter selection."
+                if _known_angle_validation_passed(known_angle_validation)
+                else "Known-angle reference validation is missing or failed; this offline result must not be described as validated."
+            ),
+            "known_angle_validation": known_angle_validation,
         },
         "quality_gates": gates,
         "cycle_split": split_payload,
@@ -807,8 +850,8 @@ def analyze_calibration_run(
             "marker_reference": reference_uncertainty,
         },
         "limitations": [
-            "The marker system is an engineering reference, not absolute ground truth.",
-            "Image-space marker quality is reported, but angular reference uncertainty remains unquantified until the separate known-angle validation is performed.",
+            "The marker system is a quantified engineering reference, not absolute ground truth.",
+            "Known-angle validation characterizes the complete camera/tag reference over the frozen 90–180 deg posterior-angle range; it does not quantify human mounting soft-tissue artefact.",
             "The recommendation is valid only for the tested sensor mounting and movement range.",
             "Estimated lag is reported diagnostically and is never optimized away per candidate.",
             "Random and budgeted-grid searches are same-budget engineering comparators, not a statistical superiority claim from one calibration run.",
@@ -1041,7 +1084,7 @@ def _candidate_quality_constraints(
     metrics: EvaluationMetrics,
     baseline_train: EvaluationMetrics,
 ) -> tuple[bool, list[str]]:
-    """Hard candidate gates used by Patch 4 instead of a weighted score."""
+    """Frozen hard candidate gates used instead of a weighted score."""
     reasons: list[str] = []
     numeric_values = (
         metrics.mae_deg,
@@ -1228,8 +1271,28 @@ def _bootstrap_validation_uncertainty(
     return payload
 
 
+def _load_run_provenance(output_directory: Path) -> dict[str, Any]:
+    path = output_directory / "RUN_PROVENANCE.json"
+    if not path.is_file():
+        return {"status": "missing"}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return {"status": "invalid", "error": str(exc)}
+    return dict(raw) if isinstance(raw, Mapping) else {"status": "invalid"}
+
+
+
+def _known_angle_validation_passed(result: Mapping[str, Any] | None) -> bool:
+    if not isinstance(result, Mapping):
+        return False
+    metrics = result.get("metrics")
+    return bool(isinstance(metrics, Mapping) and metrics.get("passed") is True)
+
 def _reference_uncertainty_summary(
     validation_rows: Sequence[Mapping[str, str]],
+    *,
+    known_angle_validation: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     valid_rows = _valid_sync_rows(validation_rows)
     thigh = [
@@ -1243,12 +1306,18 @@ def _reference_uncertainty_summary(
         if (value := _to_float(row.get("shank_reprojection_rmse_px"))) is not None
     ]
     reprojection = thigh + shank
+    known = dict(known_angle_validation) if isinstance(known_angle_validation, Mapping) else {}
+    metrics = known.get("metrics") if isinstance(known, Mapping) else None
+    passed = bool(isinstance(metrics, Mapping) and metrics.get("passed") is True)
     return {
-        "angular_uncertainty_quantified": False,
-        "status": "known_angle_reference_validation_required",
+        "angular_uncertainty_quantified": passed,
+        "status": "validated_known_angle_reference" if passed else "known_angle_reference_validation_required",
+        "known_angle_validation": known or None,
         "statement": (
-            "This run reports image-space pose quality only. Angular reference uncertainty "
-            "must come from the separate known-angle mechanical validation of the marker setup."
+            "Angular reference accuracy is taken from the persisted known-angle mechanical validation; "
+            "image-space reprojection quality is reported separately for this run."
+            if passed
+            else "Angular reference uncertainty is unavailable because the required known-angle validation did not pass."
         ),
         "valid_reference_row_count": len(valid_rows),
         "reprojection_rmse_px_median": (
@@ -1259,6 +1328,7 @@ def _reference_uncertainty_summary(
         ),
         "reprojection_rmse_px_max": max(reprojection) if reprojection else None,
     }
+
 
 def _static_quality_gates(
     static_data: ArchiveData,
@@ -1306,6 +1376,8 @@ def _quality_gates(
     parameters: KneeAngleFilterParameters,
     *,
     cycles: Sequence[Mapping[str, Any]] | None = None,
+    detected_cycle_count: int | None = None,
+    speed_blocks: Mapping[str, Any] | None = None,
     train_rows: Sequence[Mapping[str, str]] | None = None,
     validation_rows: Sequence[Mapping[str, str]] | None = None,
 ) -> dict[str, dict[str, Any]]:
@@ -1320,9 +1392,11 @@ def _quality_gates(
     )
     dynamic_angles = [float(row["visual_knee_angle_deg"]) for row in dynamic_sync]
     dynamic_range = max(dynamic_angles) - min(dynamic_angles) if dynamic_angles else 0.0
-    detected_cycles = list(cycles) if cycles is not None else _detect_dynamic_cycles(dynamic_data.sync_rows)
+    protocol_cycles = list(cycles) if cycles is not None else _protocol_dynamic_cycles(_detect_dynamic_cycles(dynamic_data.sync_rows))
+    total_detected = int(detected_cycle_count) if detected_cycle_count is not None else len(protocol_cycles)
+    speed_summary = dict(speed_blocks) if speed_blocks is not None else _speed_block_summary(protocol_cycles)
     if train_rows is None or validation_rows is None:
-        train_cycles, held_out_cycles = _split_dynamic_cycles(detected_cycles)
+        train_cycles, held_out_cycles = _split_dynamic_cycles(protocol_cycles)
         train_rows = _rows_for_cycles(dynamic_data.sync_rows, train_cycles)
         validation_rows = _rows_for_cycles(dynamic_data.sync_rows, held_out_cycles)
 
@@ -1372,9 +1446,14 @@ def _quality_gates(
             "<= 1% missing sequence steps",
         ),
         "dynamic_accepted_cycles": gate(
-            len(detected_cycles) >= MIN_ACCEPTED_DYNAMIC_CYCLES,
-            len(detected_cycles),
+            total_detected >= MIN_ACCEPTED_DYNAMIC_CYCLES,
+            total_detected,
             f">= {MIN_ACCEPTED_DYNAMIC_CYCLES} complete flexion-extension cycles",
+        ),
+        "dynamic_protocol_speed_order": gate(
+            bool(speed_summary.get("speed_order_passed", False)),
+            speed_summary,
+            "median cycle duration must decrease across the ordered slow -> normal -> brisk blocks",
         ),
         "dynamic_training_reference_rows": gate(
             len(train_rows) >= 40,
@@ -1444,18 +1523,56 @@ def _detect_dynamic_cycles(
     return cycles
 
 
+def _protocol_dynamic_cycles(
+    cycles: Sequence[Mapping[str, Any]],
+) -> list[Mapping[str, Any]]:
+    """Freeze analysis to the first 12 accepted protocol cycles."""
+    return list(cycles)[:DYNAMIC_PROTOCOL_CYCLES]
+
+
+def _speed_block_summary(
+    cycles: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    protocol = list(cycles)[:DYNAMIC_PROTOCOL_CYCLES]
+    blocks: list[dict[str, Any]] = []
+    medians: list[float] = []
+    for block_index, label in enumerate(DYNAMIC_SPEED_BLOCKS):
+        start = block_index * DYNAMIC_SPEED_BLOCK_SIZE
+        block = protocol[start:start + DYNAMIC_SPEED_BLOCK_SIZE]
+        durations = [float(cycle["duration_s"]) for cycle in block]
+        median_duration = statistics.median(durations) if len(durations) == DYNAMIC_SPEED_BLOCK_SIZE else None
+        if median_duration is not None:
+            medians.append(float(median_duration))
+        blocks.append(
+            {
+                "label": label,
+                "cycle_ids": [int(cycle["cycle_id"]) for cycle in block],
+                "durations_s": durations,
+                "median_duration_s": median_duration,
+            }
+        )
+    ordered = (
+        len(medians) == len(DYNAMIC_SPEED_BLOCKS)
+        and medians[0] > medians[1] > medians[2]
+    )
+    return {
+        "required_order": list(DYNAMIC_SPEED_BLOCKS),
+        "block_size": DYNAMIC_SPEED_BLOCK_SIZE,
+        "speed_order_passed": ordered,
+        "blocks": blocks,
+    }
+
+
 def _split_dynamic_cycles(
     cycles: Sequence[Mapping[str, Any]],
 ) -> tuple[list[Mapping[str, Any]], list[Mapping[str, Any]]]:
-    """Deterministic ~75/25 split: every fourth accepted cycle is held out."""
-    accepted = list(cycles)
-    if len(accepted) < MIN_ACCEPTED_DYNAMIC_CYCLES:
+    """Frozen 9/3 split with one held-out cycle from each speed block."""
+    accepted = list(cycles)[:DYNAMIC_PROTOCOL_CYCLES]
+    if len(accepted) < DYNAMIC_PROTOCOL_CYCLES:
         return accepted, []
-    validation = [cycle for index, cycle in enumerate(accepted, start=1) if index % HELD_OUT_CYCLE_STRIDE == 0]
-    if not validation:
-        validation = [accepted[-1]]
-    validation_ids = {int(cycle["cycle_id"]) for cycle in validation}
-    training = [cycle for cycle in accepted if int(cycle["cycle_id"]) not in validation_ids]
+    held_indices = set(HELD_OUT_CYCLE_INDICES)
+    validation = [cycle for index, cycle in enumerate(accepted, start=1) if index in held_indices]
+    training = [cycle for index, cycle in enumerate(accepted, start=1) if index not in held_indices]
     return training, validation
 
 
@@ -1744,7 +1861,9 @@ def _write_suggestions_yaml(
         else "pending"
     )
     payload = {
-        "schema_version": "vision_imu_filter_suggestions_v2",
+        "schema_version": "vision_imu_filter_suggestions_v3",
+        "protocol_version": FINAL_PROTOCOL_VERSION,
+        "protocol": PROTOCOL_SUMMARY,
         "calibration_id": run_id,
         "generated_at": datetime.now().astimezone().isoformat(),
         "status": str(status),
@@ -1766,6 +1885,9 @@ def _write_suggestions_yaml(
             dict(final_parameters) if final_parameters is not None else None
         ),
     }
+    run_provenance = _load_run_provenance(path.parent)
+    if run_provenance:
+        payload["provenance"] = run_provenance
     if held_out_rmse_improvement_percent is not None:
         payload["held_out_rmse_improvement_percent"] = float(
             held_out_rmse_improvement_percent

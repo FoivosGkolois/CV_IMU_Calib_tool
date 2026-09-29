@@ -121,6 +121,14 @@ The normal recorder writes only to `video_recordings`. Static and dynamic calibr
 
 Phase 2 intentionally does not add motor control. The MCU remains dedicated to deterministic sensor acquisition, and Linux owns the heavy processing and experiment workflow.
 
-## V2 marker-reference migration note
+## Final Phase 2 calibration application
 
-Patch 1.2 adds the calibrated 3-D two-tag geometry and fixed frame-quality gates to the Linux/Python reference layer. The live knee reference remains invalid until Patch 2.1 supplies persistent checkerboard camera intrinsics matching the active processed image resolution. The legacy scientific calibration analysis remains locked until its Patch 3 replacement; normal reference/IMU recording remains available.
+The Phase 2 App Lab package is now the final thesis calibration path. It uses the persistent checkerboard camera setup, the validated two-AprilTag 3-D reference, physics-based static IMU calibration, deterministic replay, Gaussian-Process Bayesian Optimization, and held-out validation.
+
+The frozen user protocol and scientific rationale are documented in:
+
+```text
+computer/vision_imu_calibration/FINAL_PROTOCOL_AND_RATIONALE.md
+```
+
+The Windows/UNO R4 and UNO Q Phase 1 sketches remain only as fallback/diagnostic acquisition tools. They are not the normal final calibration workflow.

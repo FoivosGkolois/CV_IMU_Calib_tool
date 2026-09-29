@@ -1,0 +1,38 @@
+PATCH 5 — FINALIZATION / PROTOCOL FREEZE
+
+BASELINE
+CV_IMU_Calib_tool(20260929-145240).zip / branch V2_tags_Bayes / Patch 4 applied.
+
+WHAT THIS PATCH DOES
+1. Adds one-time known-angle validation for the full camera + two-tag reference.
+2. Persists the validation result in reference_setup.yaml and reference log.
+3. Freezes final routine protocol:
+   - static: 12 s fully extended and still,
+   - dynamic: first 12 accepted complete cycles,
+   - order: 4 slow + 4 normal + 4 brisk,
+   - held-out cycles: 4, 8, 12,
+   - dynamic recording allowance: 60 s.
+4. Freezes known-angle validation:
+   - 180, 150, 120, 90 deg,
+   - 5 captures per angle,
+   - 1 s median capture, >=15 valid frames,
+   - RMSE <=5 deg,
+   - each tested angle MAE <=5 deg,
+   - repeatability SD <=2 deg.
+5. Adds build/source/filter/reference provenance to final run outputs.
+6. Saves the exact reference_setup.yaml snapshot with every calibration run.
+7. Removes stale migration wording and documents the final protocol/rationale.
+8. Stops presenting container-internal 172.x addresses as browser URLs.
+
+APPLY
+1. Extract this patch ZIP into the CV_IMU_Calib_tool root.
+2. Replace all files when asked.
+3. Run DELETE_FILES_PATCH_5.txt with the PowerShell command supplied in chat.
+4. Run 13_BUILD_UNO_Q_PHASE2_APP.bat.
+5. Import the newly generated uno_q_phase2_app_ready.zip into Arduino App Lab.
+
+FINAL HARDWARE ACCEPTANCE
+Use FINAL_FREEZE_CHECKLIST.txt.
+
+IMPORTANT
+The C++ parity test remains intentionally skipped inside this standalone repository because the production exoskeleton STM32 knee-angle source is not present here. Before making the thesis claim that offline replay is exactly identical to the production embedded filter, verify the current production STM32 implementation/source or trace once and record its version.

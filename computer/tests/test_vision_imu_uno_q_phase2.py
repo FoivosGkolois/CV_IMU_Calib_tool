@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 import zipfile
 
 from computer.vision_imu_calibration.__main__ import build_parser
@@ -68,6 +69,12 @@ def test_phase2_builder_creates_self_contained_app_payload(tmp_path: Path) -> No
         in names
     )
     assert not any("__pycache__" in name or name.endswith(".pyc") for name in names)
+    with zipfile.ZipFile(archive) as bundle:
+        build_info = json.loads(
+            bundle.read("uno_q_phase2_app_ready/python/project/BUILD_INFO.json").decode("utf-8")
+        )
+    assert build_info["calibration_source_tree_sha256"]
+    assert build_info["mcu_sketch_sha256"]
 
 
 def test_cli_accepts_explicit_camera_index_and_v4l2_backend() -> None:
@@ -131,14 +138,15 @@ def test_phase2_launcher_reports_copy_paste_ready_url_and_startup_failure() -> N
     descriptor = (template_root / "app.yaml").read_text(encoding="utf-8")
 
     assert "WEB GUI READY" in launcher
-    assert "COPY/PASTE ONE OF THESE LINKS" in launcher
+    assert "COPY/PASTE THE LINK THAT MATCHES THE UNO Q IP" in launcher
     assert "WEB GUI DID NOT START" in launcher
     assert "WEB GUI STARTUP TIMEOUT" in launcher
     assert "socket.create_connection" in launcher
     assert '"--host",' in launcher and '"0.0.0.0",' in launcher
     assert "ports:" in descriptor and "8765" in descriptor
     assert "WEB GUI READY" in readme
-    assert "ERR_CONNECTION_REFUSED" in readme
+    assert "http://<UNO-Q-IP>:8765" in readme
+    assert "172.x.x.x" in readme
 
 def test_phase2_sketch_matches_project_router_baud() -> None:
     project_root = Path(__file__).resolve().parents[2]

@@ -11,7 +11,7 @@ SHANK_TAG_ID = 1
 TAG_SIZE_M = 0.070
 
 # Frozen engineering quality gates for the reference layer. These are not exposed
-# as routine user tuning controls. Patch 2.1 will provide the calibrated camera
+# as routine user tuning controls. The persistent checkerboard setup provides the calibrated camera
 # model that activates this geometry path.
 MIN_MARKER_SIDE_PX = 20.0
 MAX_VIEW_ANGLE_DEG = 65.0

@@ -1,0 +1,34 @@
+CV_IMU CALIBRATION TOOL — FINAL FREEZE CHECKLIST
+
+Do this once before declaring the tool frozen for thesis experiments.
+
+1. BUILD / STARTUP
+[ ] 13_BUILD_UNO_Q_PHASE2_APP.bat succeeds.
+[ ] App Lab starts without Bridge errors.
+[ ] Both IMUs are READY at about 100 Hz.
+[ ] Parse errors and queue drops remain zero during a short run.
+
+2. ONE-TIME REFERENCE SETUP
+[ ] Checkerboard printed at 100%; one square measures 25 x 25 mm.
+[ ] Camera calibration reaches 15/15 accepted diverse views and passes.
+[ ] Power-cycle UNO Q; saved camera setup loads automatically.
+[ ] AprilTags printed at 100%; black squares measure 70 x 70 mm.
+[ ] Same rigid Tag 0 / Tag 1 plates are used for fixture validation and exoskeleton mounting.
+[ ] Known-angle validation: 180, 150, 120, 90 deg; 5 captures each; PASS.
+[ ] Power-cycle UNO Q; reference validation still shows persisted PASS.
+
+3. END-TO-END CALIBRATION
+[ ] Static test: 12 s, fully extended and still; completes successfully.
+[ ] Dynamic test: 4 slow + 4 normal + 4 brisk complete cycles.
+[ ] Tool accepts 12 cycles and reports 9 tuning + 3 held-out cycles.
+[ ] Bayesian optimization completes.
+[ ] Browser and imu_filter_suggestions.yaml show the same recommended settings.
+[ ] calibration_report.json and calibration_overview.png are created.
+[ ] reference_setup_snapshot.yaml and RUN_PROVENANCE.json exist in the same run folder.
+
+4. SCIENTIFIC FREEZE
+[ ] Verify the Python replay implementation against the current production STM32 knee-angle filter source/trace.
+[ ] Record the production firmware/filter version used for the final experiments.
+[ ] Do not change the frozen protocol, parameter bounds, scoring or constraints after final data collection begins.
+
+If every item above passes, freeze the software and move to final thesis experiments.

@@ -1,130 +1,70 @@
-# Vision–IMU Calibration — V2 marker-reference migration
+# Vision–IMU Calibration Tool — final thesis architecture
 
-This tool is migrating from learned human-pose estimation to a fixed two-tag geometric reference.
+This is the standalone calibration and validation environment for the dual-IMU knee-angle estimator used in the knee-assist exoskeleton thesis.
 
-Current measurement contract:
+## What the tool does
+
+1. A USB camera observes two rigid AprilTags: Tag 0 on the thigh and Tag 1 on the shank.
+2. One-time checkerboard calibration gives the camera its geometric calibration.
+3. One-time known-angle fixture validation measures how accurately and repeatably the complete camera + tag reference reports knee angle.
+4. A 12 s stationary full-extension stage measures IMU bias/noise and straight-leg offset from physics.
+5. A dynamic trial records 12 complete flexion-extension cycles at slow, normal and brisk speeds.
+6. The exact same raw IMU recording is replayed through many filter settings.
+7. Gaussian-Process Bayesian Optimization selects filter settings using only training cycles.
+8. Three cycles, one from each speed block, remain unseen until final validation.
+9. The browser, YAML, JSON and overview plot report the recommendation and validation evidence.
+
+The full frozen protocol and its rationale are in `FINAL_PROTOCOL_AND_RATIONALE.md`.
+
+## Execution split
 
 ```text
-USB camera -> AprilTag detector -> calibrated 3-D tag poses
-Tag 0 -> thigh
-Tag 1 -> shank
-relative 3-D segment orientation -> posterior knee angle
+UNO Q MCU   -> deterministic dual-LSM6DSOX acquisition at ~100 Hz
+Arduino Bridge (921600 baud) -> raw samples to UNO Q Linux
+UNO Q Linux -> camera/tags, calibration, replay, optimization, logging, reports
+PC          -> browser only
 ```
 
-The previous MoveNet model, landmark smoothing, confidence threshold, leg selection, and angle-smoothing controls are removed from the active calibration path.
+No motor control is included in this App Lab calibration application.
 
-## Current reference-setup state
-
-Patch 1.2 provides the calibrated 3-D two-tag geometry and fixed reference-quality gates.
-Patch 2.1 provides the checkerboard camera-calibration workflow. Patch 2.2 persists a
-successful setup in `reference_setup.yaml`, reloads it on startup, validates the saved
-camera geometry/resolution before use, and records setup history in
-`REFERENCE_SETUP_LOG.txt`. No uncalibrated 2-D fallback is allowed.
-
-## Mounting contract
+## Reference contract
 
 - Dictionary: AprilTag 36h11
 - Tag 0: THIGH
 - Tag 1: SHANK
 - black-square side: 70 mm
-- tags rigidly mounted to their carriers
-- the image-top edge of each tag points proximally along its segment
-  - thigh -> toward hip
-  - shank -> toward knee
+- rigid, flat mounting
+- tag top edge points proximally along the segment
+- posterior knee angle: 180 deg = full extension
 
-The relative angle uses the 3-D proximal axes of the two tags, so common body rotation relative to the camera largely cancels.
+There is no uncalibrated 2-D fallback. A valid 3-D reference requires the saved camera calibration.
 
-## Migration safety gate
+## Persistent reference setup
 
-Patch 3 enables the scientific calibration workflow. The static stage derives straight-leg offset, gyro bias/noise and deadband from the known full-extension condition and stationary IMU physics; the marker reference is only an optional sanity check in this stage. The dynamic stage detects complete marker-reference cycles, selects temporary grid-search candidates only on training cycles, and reports final performance on held-out cycles that were not used for parameter selection. Candidate-specific time shifting is not used in the primary RMSE objective.
-
-Normal recording remains available throughout the migration.
-
-## What remains unchanged
-
-- camera auto-detection and camera profiles,
-- UNO Q Bridge / serial IMU acquisition,
-- raw IMU schema and 100 Hz acquisition contract,
-- host mirror of the STM32 knee-angle filter,
-- recorder ownership and export roots,
-- static -> dynamic calibration session ownership,
-- synchronized timelines and calibration run folders.
-
-## Dependencies
-
-PC:
+The UNO Q stores the one-time setup in its persistent App Lab data area:
 
 ```text
-opencv-contrib-python
+reference_setup.yaml
+REFERENCE_SETUP_LOG.txt
 ```
 
-UNO Q App Lab:
+The setup contains camera intrinsics, calibration quality, tag geometry and the known-angle reference-validation result. Ordinary UNO Q power cycles do not require repeating the setup. Recalibration is required if the camera/lens/resolution/rotation geometry changes.
 
-```text
-opencv-contrib-python-headless
-```
-
-OpenCV contrib is required for the AprilTag dictionary support.
-
-## Required printed reference targets
-
-Printable AprilTag assets and the mounting contract are under:
-
-```text
-reference_setup/tags/
-```
-
-The Patch 2.1 checkerboard and exact-size printing instructions are under:
-
-```text
-reference_setup/checkerboard/
-```
-
-## Normal outputs
-
-Simple recorder:
-
-```text
-video_recordings/
-```
-
-Calibration run ownership remains:
+## Routine calibration outputs
 
 ```text
 calibration_suggestions/calibration_run_<timestamp>/
+    static_trial.zip
+    dynamic_trial.zip
+    reference_setup_snapshot.yaml
+    RUN_PROVENANCE.json
+    imu_filter_suggestions.yaml
+    calibration_report.json
+    calibration_overview.png
 ```
 
-The reference timeline is:
+The run stores a snapshot/hash of the active reference setup and build/filter provenance so the final result can be traced back to the exact setup used.
 
-```text
-reference_timeline.csv
-```
+## Scientific boundaries
 
-and the annotated video is:
-
-```text
-annotated_reference.mp4
-```
-
-(or AVI fallback).
-
-## Scientific calibration state
-
-The current calibration path is now complete through Patch 4:
-
-1. physics-based static calibration derives stationary gyro bias/noise, deadband,
-   and the full-extension straight-leg offset without tuning against the filter output;
-2. deterministic replay evaluates the real knee-angle filter on identical raw IMU data;
-3. a Gaussian-process surrogate with Expected Improvement performs Bayesian Optimization
-   of `alpha_stable`, `alpha_dynamic`, and `max_accel_correction_deg` only;
-4. hard candidate gates reject invalid/unresolved candidates instead of adding weighted
-   penalty terms to the primary objective;
-5. every fourth accepted dynamic cycle remains held out and is never used for selection;
-6. the final report includes GP uncertainty, held-out validation metrics, cycle-level
-   bootstrap confidence intervals when enough held-out cycles exist, and same-budget
-   random/grid engineering comparators;
-7. the browser and YAML export show the same final recommended parameters.
-
-The marker reference remains an engineering reference. Image-space pose quality is
-reported, but angular reference uncertainty is not claimed until the separate known-angle
-mechanical validation of the exact physical tag setup is performed.
+The marker system is a validated engineering reference, not absolute ground truth. The Bayesian optimizer searches filter parameters; it does not identify gait intent or control the exoskeleton. The tool is an engineering/thesis calibration environment, not a clinical or medical device.

@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import shutil
+import subprocess
 import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -41,6 +44,12 @@ def build_app(project_root: Path, output_dir: Path) -> Path:
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo"),
     )
 
+    build_info = _build_info(project_root, package_source)
+    (payload_root / "BUILD_INFO.json").write_text(
+        json.dumps(build_info, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
     manifest_lines: list[str] = []
     for path in sorted(p for p in ready_dir.rglob("*") if p.is_file()):
         relative = path.relative_to(ready_dir).as_posix()
@@ -56,6 +65,63 @@ def build_app(project_root: Path, output_dir: Path) -> Path:
             archive.write(path, arcname=f"uno_q_phase2_app_ready/{path.relative_to(ready_dir).as_posix()}")
     return archive_path
 
+
+
+def _git_value(project_root: Path, *args: str) -> str:
+    try:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=project_root,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+    except Exception:
+        return ""
+    return result.stdout.strip()
+
+
+
+def _tree_digest(root: Path) -> str:
+    digest = hashlib.sha256()
+    if not root.is_dir():
+        return ""
+    for path in sorted(p for p in root.rglob("*") if p.is_file()):
+        if "__pycache__" in path.parts or path.suffix in {".pyc", ".pyo"}:
+            continue
+        relative = path.relative_to(root).as_posix().encode("utf-8")
+        digest.update(relative)
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+def _build_info(project_root: Path, package_source: Path) -> dict[str, object]:
+    filter_path = package_source / "imu_filter.py"
+    protocol_path = package_source / "final_protocol.py"
+    sketch_path = project_root / "standalone_tools" / "vision_imu_calibration" / "uno_q_phase2_app_lab_template" / "sketch" / "sketch.ino"
+    commit = _git_value(project_root, "rev-parse", "HEAD")
+    branch = _git_value(project_root, "rev-parse", "--abbrev-ref", "HEAD")
+    dirty = bool(_git_value(project_root, "status", "--porcelain"))
+    return {
+        "schema_version": 1,
+        "built_utc": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+        "git_commit": commit,
+        "git_branch": branch,
+        "git_dirty": dirty,
+        "filter_implementation_file": "computer/vision_imu_calibration/imu_filter.py",
+        "filter_implementation_sha256": (
+            hashlib.sha256(filter_path.read_bytes()).hexdigest() if filter_path.is_file() else ""
+        ),
+        "protocol_file_sha256": (
+            hashlib.sha256(protocol_path.read_bytes()).hexdigest() if protocol_path.is_file() else ""
+        ),
+        "calibration_source_tree_sha256": _tree_digest(package_source),
+        "mcu_sketch_sha256": (
+            hashlib.sha256(sketch_path.read_bytes()).hexdigest() if sketch_path.is_file() else ""
+        ),
+    }
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build the UNO Q Phase 2 App Lab payload")
