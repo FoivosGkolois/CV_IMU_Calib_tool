@@ -22,62 +22,127 @@ _PAGE = r'''<!doctype html>
   --text:#eef4ff; --muted:#91a4bf; --blue:#39a0ff; --green:#51e26d; --red:#ff6464;
 }
 * { box-sizing:border-box; }
-html, body { width:100%; height:100%; min-width:320px; overflow:hidden; }
-body { margin:0; background:var(--bg); color:var(--text); }
-#dashboardFit { width:100%; transform-origin:top left; }
-main { display:grid; grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) minmax(300px,.8fr); gap:12px; padding:12px; width:100%; margin:0; align-items:start; }
-.camera-column { min-width:0; width:100%; display:flex; justify-content:stretch; align-items:flex-start; }
-.live-column { min-width:0; display:grid; grid-template-rows:auto auto; align-content:start; gap:10px; }
-.video-shell { background:#05070b; border:1px solid var(--line); border-radius:14px; overflow:hidden; width:100%; min-width:0; aspect-ratio:16 / 9; align-self:start; display:flex; align-items:center; justify-content:center; }
+html, body { width:100%; min-width:320px; margin:0; background:var(--bg); color:var(--text); }
+body { min-height:100vh; overflow:hidden; }
+#dashboardFit { width:100%; height:100vh; }
+main {
+  display:grid;
+  grid-template-columns:minmax(320px,.82fr) minmax(500px,1.18fr) minmax(360px,.76fr);
+  gap:12px;
+  padding:12px;
+  width:100%;
+  height:100vh;
+  margin:0;
+  align-items:stretch;
+  overflow:hidden;
+}
+.camera-column {
+  min-width:0;
+  height:100%;
+  display:flex;
+  align-items:flex-start;
+  justify-content:center;
+  overflow:hidden;
+}
+.live-column {
+  min-width:0;
+  height:100%;
+  display:grid;
+  grid-template-rows:auto minmax(260px,1fr) auto;
+  align-content:stretch;
+  gap:10px;
+  overflow:hidden;
+}
+.video-shell {
+  background:#05070b;
+  border:1px solid var(--line);
+  border-radius:14px;
+  overflow:hidden;
+  width:100%;
+  max-height:100%;
+  min-width:0;
+  aspect-ratio:16 / 9;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
 .video-shell img { width:100%; height:100%; object-fit:contain; display:block; }
 .live-summary { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; align-items:start; }
 .summary-card, .card, .chart-card { background:var(--surface); border:1px solid var(--line); border-radius:12px; }
 .summary-card { padding:10px 12px; min-width:0; max-width:100%; overflow:visible; }
-.summary-card .value { font-size:clamp(16px,1.4vw,21px); }
-.control-panel { min-width:0; display:grid; gap:10px; }
-.card { padding:12px; min-width:0; max-width:100%; overflow:visible; }
+.summary-card .value { font-size:clamp(18px,1.2vw,22px); }
+.control-panel {
+  min-width:0;
+  min-height:0;
+  max-height:100%;
+  display:grid;
+  align-content:start;
+  gap:9px;
+  overflow-y:auto;
+  overflow-x:hidden;
+  padding-right:3px;
+  scrollbar-width:thin;
+  scrollbar-color:#31445f transparent;
+}
+.control-panel::-webkit-scrollbar { width:7px; }
+.control-panel::-webkit-scrollbar-thumb { background:#31445f; border-radius:999px; }
+.card { padding:11px 12px; min-width:0; max-width:100%; overflow:visible; }
 .card.priority { border-color:#365374; box-shadow:0 0 0 1px rgba(57,160,255,.08); }
-.card summary { cursor:pointer; list-style:none; display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.card.compact { padding:9px 11px; }
+.card summary { cursor:pointer; list-style:none; display:flex; align-items:center; justify-content:space-between; gap:8px; min-height:20px; }
 .card summary::-webkit-details-marker { display:none; }
 .card summary::after { content:"▾"; color:var(--muted); font-size:12px; }
 .card:not([open]) summary::after { transform:rotate(-90deg); }
-.label { color:var(--muted); font-size:10px; letter-spacing:.1em; text-transform:uppercase; }
+.section-divider { height:1px; background:#25344a; margin:11px 0; }
+.subhead { color:#c7d5e9; font-size:11px; font-weight:700; margin:0 0 4px; }
+.label { color:var(--muted); font-size:11px; letter-spacing:.09em; text-transform:uppercase; }
 .value { margin-top:5px; font-size:20px; font-weight:700; line-height:1.15; }
 .ok { color:var(--green); } .bad { color:var(--red); } .rec { color:#ff7b7b; }
-.small { font-size:12px; color:#d8e3f4; overflow-wrap:anywhere; }
-.note { color:var(--muted); font-size:10.5px; line-height:1.4; margin-top:7px; overflow-wrap:anywhere; }
+.small { font-size:12.5px; color:#d8e3f4; overflow-wrap:anywhere; }
+.note { color:var(--muted); font-size:11.5px; line-height:1.38; margin-top:6px; overflow-wrap:anywhere; }
 .controls { display:grid; gap:12px; margin-top:10px; }
 .control-row { display:grid; gap:5px; }
 .control-head { display:flex; justify-content:space-between; gap:10px; font-size:12px; color:#c9d5e7; }
 .control-help { color:#8fa3bd; font-size:10px; line-height:1.35; }
 .control-help b { color:#c9d5e7; font-weight:650; }
 input[type=range] { width:100%; accent-color:var(--blue); }
-select, button { width:100%; min-width:0; height:36px; border:1px solid #354764; border-radius:9px; background:var(--surface-2); color:var(--text); padding:0 10px; font:inherit; font-size:12px; }
+select, button {
+  width:100%; min-width:0; height:38px;
+  border:1px solid #354764; border-radius:9px;
+  background:var(--surface-2); color:var(--text);
+  padding:0 10px; font:inherit; font-size:12.5px;
+}
 button { cursor:pointer; font-weight:700; }
 button.primary { background:#1767b2; border-color:#2789de; }
 button.record { background:#8d2028; border-color:#d3414d; }
 button.stop { background:#263348; }
 button.secondary { background:#172234; }
 button:disabled { opacity:.45; cursor:not-allowed; }
-.button-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-top:9px; }
+.button-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; margin-top:8px; }
 .inline-grid { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:7px; align-items:center; margin-top:8px; }
 .inline-grid button { width:auto; min-width:78px; }
-.path-link { display:block; width:100%; height:auto; min-height:34px; margin-top:8px; padding:7px 9px; text-align:left; text-decoration:none; white-space:normal; line-height:1.3; font-weight:600; font-size:12px; color:#a9d6ff; background:#0b1726; border:1px dashed #354764; border-radius:9px; overflow-wrap:anywhere; }
+.path-link {
+  display:block; width:100%; height:auto; min-height:32px;
+  margin-top:7px; padding:6px 8px; text-align:left; text-decoration:none;
+  white-space:normal; line-height:1.25; font-weight:600; font-size:11.5px;
+  color:#a9d6ff; background:#0b1726; border:1px dashed #354764;
+  border-radius:9px; overflow-wrap:anywhere;
+}
 .path-link:hover { border-color:var(--blue); background:#10243b; }
 .path-link[aria-disabled="true"] { opacity:.45; pointer-events:none; }
 .metric-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; margin-top:8px; }
 .metric { background:var(--surface-2); border:1px solid #2a3952; border-radius:9px; padding:8px; min-width:0; }
-.metric .name { color:var(--muted); font-size:9px; text-transform:uppercase; letter-spacing:.07em; }
+.metric .name { color:var(--muted); font-size:9.5px; text-transform:uppercase; letter-spacing:.07em; }
 .metric .number { margin-top:4px; font-size:16px; font-weight:700; overflow-wrap:anywhere; }
-.chart-card { padding:12px; height:clamp(230px,32vh,360px); min-width:0; max-width:100%; overflow:hidden; }
+.chart-card { padding:12px; min-height:0; height:auto; min-width:0; max-width:100%; overflow:hidden; }
 .recommendation-card { padding:11px 12px; min-width:0; }
-.recommendation-values { margin-top:6px; color:#d8e3f4; font-size:11px; line-height:1.5; overflow-wrap:anywhere; }
-.chart-shell { height:calc(100% - 48px); min-height:140px; margin-top:8px; }
+.recommendation-values { margin-top:6px; color:#d8e3f4; font-size:11.5px; line-height:1.45; overflow-wrap:anywhere; }
+.chart-shell { height:calc(100% - 48px); min-height:190px; margin-top:8px; }
 .chart-shell canvas { width:100%; height:100%; display:block; background:#0a101a; border-radius:9px; }
 .calibration-card { border-color:#6f5b25; box-shadow:0 0 0 1px rgba(255,194,77,.10); }
-.calibration-actions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-top:9px; }
+.calibration-actions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; margin-top:8px; }
 .calibration-actions button { min-height:38px; height:auto; padding:7px 9px; }
-.progress-track { height:8px; margin-top:9px; border-radius:999px; overflow:hidden; background:#0a101a; border:1px solid #2a3952; }
+.progress-track { height:7px; margin-top:8px; border-radius:999px; overflow:hidden; background:#0a101a; border:1px solid #2a3952; }
 .progress-fill { height:100%; width:0%; background:#39a0ff; transition:width .25s linear; }
 .modal-backdrop { position:fixed; inset:0; z-index:1000; display:flex; align-items:center; justify-content:center; padding:18px; background:rgba(3,7,12,.86); }
 .modal-backdrop[hidden] { display:none; }
@@ -86,25 +151,33 @@ button:disabled { opacity:.45; cursor:not-allowed; }
 .modal-card ol { margin:10px 0 14px 22px; padding:0; color:#d8e3f4; line-height:1.55; font-size:13px; }
 .countdown { min-height:52px; display:flex; align-items:center; justify-content:center; font-size:42px; font-weight:800; color:#ffcc66; }
 .modal-buttons { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
-footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size:10px; }
-@media (max-width:1280px) {
-  main { grid-template-columns:minmax(0,1.1fr) minmax(0,1fr); }
-  .control-panel { grid-column:1 / -1; grid-template-columns:repeat(2,minmax(0,1fr)); }
-  .control-panel > .wide { grid-column:1 / -1; }
+footer { display:none; }
+
+/* Desktop: three readable columns, no page-level scroll and no global zoom. */
+@media (min-width:1451px) {
+  html, body { height:100%; overflow:hidden; }
 }
-@media (max-width:860px) {
+
+/* Smaller browser windows reflow instead of shrinking the whole UI. */
+@media (max-width:1450px) {
+  body { overflow:auto; }
+  #dashboardFit { height:auto; }
+  main { height:auto; min-height:100vh; overflow:visible; grid-template-columns:minmax(360px,.9fr) minmax(520px,1.1fr); }
+  .control-panel { grid-column:1 / -1; max-height:none; overflow:visible; grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .control-panel > .wide { grid-column:1 / -1; }
+  .live-column { height:auto; min-height:760px; }
+}
+@media (max-width:920px) {
   main { grid-template-columns:1fr; padding:10px; gap:10px; }
-  .camera-column { justify-content:flex-start; }
-  .live-column { grid-template-rows:auto auto; }
+  .camera-column, .live-column { height:auto; min-height:0; }
   .control-panel { grid-template-columns:1fr; }
   .live-summary { grid-template-columns:repeat(2,minmax(0,1fr)); }
-  .chart-card { width:100%; height:250px; }
-  .chart-shell { height:calc(100% - 48px); }
+  .chart-card { min-height:300px; }
   .button-grid { grid-template-columns:1fr 1fr; }
 }
-@media (max-width:440px) {
+@media (max-width:480px) {
   .live-summary { grid-template-columns:1fr; }
-  .button-grid { grid-template-columns:1fr; }
+  .button-grid, .calibration-actions { grid-template-columns:1fr; }
 }
 </style>
 </head>
@@ -148,7 +221,9 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
     <a id="calibrationPath" class="path-link" href="/exports/calibration/" target="_blank" rel="noopener">Calibration files will be exported to calibration_suggestions.</a>
   </div>
 
-  <div class="card priority wide">
+  <details class="card compact wide">
+    <summary><span class="label">Manual recording / exports</span></summary>
+    <div style="margin-top:8px">
     <div class="label">Recording</div>
     <div id="recording" class="value small">IDLE</div>
     <div class="button-grid">
@@ -156,9 +231,12 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
       <button id="stopRecording" class="stop" onclick="recordStop()">Stop</button>
     </div>
     <a id="recordingPath" class="path-link" href="/exports/recordings/" target="_blank" rel="noopener">Video recordings are finalized as ZIP files inside video_recordings.</a>
-  </div>
+    </div>
+  </details>
 
-  <div class="card wide">
+  <details class="card compact wide">
+    <summary><span class="label">IMU source / communication</span></summary>
+    <div style="margin-top:8px">
     <div class="label">Raw IMU source</div>
     <div id="imuState" class="value small">DISCONNECTED</div>
     <div id="imuSerialControls">
@@ -169,7 +247,8 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
     <div id="imuRate" class="note">Rate: 0.0 Hz · Port: —</div>
     <div id="imuSensors" class="note">Thigh: NOT READY · Shank: NOT READY</div>
     <div id="imuHealth" class="note">Samples: 0 · Gaps: 0 · Parse errors: 0 · Queue drops: 0</div>
-  </div>
+    </div>
+  </details>
 
 
   <div class="card wide">
@@ -187,24 +266,26 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
   <div class="card wide">
     <div class="label">One-time tag reference validation</div>
     <div id="referenceValidationState" class="value small">NOT PERFORMED</div>
-    <div id="referenceValidationMessage" class="note">After camera calibration, mount Tag 0 and Tag 1 on a rigid hinged goniometer/fixture.</div>
+    <div id="referenceValidationMessage" class="note">After camera calibration, mount Tag 0 and Tag 1 on a rigid known-angle fixture.</div>
     <div class="progress-track"><div id="referenceValidationProgress" class="progress-fill"></div></div>
     <div class="button-grid">
       <button id="startReferenceValidation" class="primary" onclick="referenceValidationStart()">Start known-angle validation</button>
       <button id="captureReferenceValidation" class="primary" onclick="referenceValidationCapture()">Capture current angle</button>
       <button id="cancelReferenceValidation" class="secondary" onclick="referenceValidationCancel()">Cancel</button>
     </div>
-    <div id="referenceValidationQuality" class="note">Targets: 180°, 150°, 120°, 90° · 5 captures each · one-time persistent result</div>
+    <div id="referenceValidationQuality" class="note">Targets: 180°, 150°, 120°, 90° · 5 captures each · persistent result</div>
   </div>
 
-  <div class="card">
-    <div class="label">Camera profile</div>
+  <details class="card compact wide">
+    <summary><span class="label">Camera profile</span></summary>
+    <div style="margin-top:8px">
     <select id="cameraProfile" style="margin-top:8px"><option value="fast">Fast · 640×480</option><option value="quality">Quality · 1280×720</option></select>
     <button id="applyCameraProfile" class="primary" style="margin-top:8px" onclick="setCameraProfile()">Apply profile</button>
     <div id="cameraProfileMessage" class="note"><b>Fast:</b> lower load. <b>Quality:</b> more detail at difficult angles.</div>
-  </div>
+    </div>
+  </details>
 
-  <details class="card" open>
+  <details class="card compact wide">
     <summary><span class="label">IMU estimator details</span></summary>
     <div class="metric-grid">
       <div class="metric"><div class="name">Visual − IMU</div><div id="angleDifference" class="number">--.-°</div></div>
@@ -216,15 +297,15 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
     <div id="imuFilterInfo" class="note">Waiting for synchronized raw IMU samples.</div>
   </details>
 
-  <details class="card wide" open>
-    <summary><span class="label">Tag reference</span></summary>
+  <details class="card compact wide">
+    <summary><span class="label">Tag reference diagnostics</span></summary>
     <div id="thighTagState" class="note">Thigh · Tag 0: NOT DETECTED</div>
     <div id="shankTagState" class="note">Shank · Tag 1: NOT DETECTED</div>
     <div id="referenceQuality" class="note">3-D pose quality: waiting for calibrated camera setup.</div>
     <div class="note">The calibrated 3-D relative-angle geometry uses the persistent checkerboard camera setup and fixed quality gates.</div>
   </details>
 
-  <details class="card wide">
+  <details class="card compact wide">
     <summary><span class="label">Runtime diagnostics</span></summary>
     <div id="runtime" class="value small">STARTING</div>
     <div id="backend" class="note">Backend: AprilTag 36h11</div>
@@ -233,7 +314,7 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
   </details>
 </aside>
 </main>
-<footer>Final protocol: validated two-tag geometric reference · physics-based static calibration · 12-cycle multi-speed tuning · GP Bayesian Optimization · held-out validation.</footer>
+<footer>Final protocol · validated two-tag reference · physics-based static calibration · GP Bayesian Optimization · held-out validation.</footer>
 </div>
 <div id="calibrationModal" class="modal-backdrop" hidden>
   <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="calibrationModalTitle">
@@ -292,6 +373,13 @@ const imuMessage=document.getElementById('imuMessage');
 const cameraProfile=document.getElementById('cameraProfile');
 const applyCameraProfile=document.getElementById('applyCameraProfile');
 const cameraProfileMessage=document.getElementById('cameraProfileMessage');
+const referenceValidationState=document.getElementById('referenceValidationState');
+const referenceValidationMessage=document.getElementById('referenceValidationMessage');
+const referenceValidationProgress=document.getElementById('referenceValidationProgress');
+const referenceValidationQuality=document.getElementById('referenceValidationQuality');
+const startReferenceValidation=document.getElementById('startReferenceValidation');
+const captureReferenceValidation=document.getElementById('captureReferenceValidation');
+const cancelReferenceValidation=document.getElementById('cancelReferenceValidation');
 const imuEstimatorState=document.getElementById('imuEstimatorState');
 const imuAngle=document.getElementById('imuAngle');
 const angleDifference=document.getElementById('angleDifference');
@@ -309,10 +397,6 @@ let dashboardFitPending=false;
 function fitDashboardToViewport(){
   if(!dashboardFit) return;
   dashboardFit.style.zoom='1';
-  const naturalWidth=Math.max(1,dashboardFit.scrollWidth);
-  const naturalHeight=Math.max(1,dashboardFit.scrollHeight);
-  const scale=Math.min(1, window.innerWidth/naturalWidth, window.innerHeight/naturalHeight);
-  dashboardFit.style.zoom=String(Math.max(0.1,scale));
   dashboardFitPending=false;
 }
 function scheduleDashboardFit(){
@@ -380,6 +464,7 @@ async function cameraCalibrationCancel(){
   const r=await fetch('/api/reference/camera-calibration/cancel',{method:'POST'}); const body=await r.json();
   cameraCalibrationMessage.textContent=r.ok?(body.message||'Checkerboard calibration cancelled.'):('Cancel failed: '+(body.error||'unknown error'));
 }
+
 async function referenceValidationStart(){
   const r=await fetch('/api/reference/known-angle-validation/start',{method:'POST'}); const body=await r.json();
   referenceValidationMessage.textContent=r.ok?(body.message||'Known-angle validation started.'):('Start failed: '+(body.error||'unknown error'));
@@ -406,11 +491,11 @@ const CALIBRATION_GUIDANCE={
   },
   dynamic:{
     title:'Dynamic calibration test',
-    intro:'The tool records for up to 60 seconds. The final protocol uses exactly 12 accepted complete cycles.',
+    intro:'The tool records for up to 60 seconds. The final protocol uses 12 accepted complete cycles.',
     steps:[
       'Keep exactly the same IMU, tag, and camera mounting used for the static test.',
       'Keep both AprilTags visible and wait for Reference VALID.',
-      'Perform 4 deliberately slow complete flexion–extension cycles, then 4 comfortable/normal cycles, then 4 brisk cycles. The tool uses 9 for tuning and keeps one from each speed block unseen for the final check.'
+      'Perform 12 complete cycles in order: 4 deliberately slow, 4 comfortable/normal, then 4 brisk but controlled. The tool keeps one cycle from each speed block for the final independent check.'
     ]
   }
 };
@@ -817,27 +902,6 @@ def create_app(runtime: VisionRuntime) -> Any:
     def camera_calibration_cancel() -> Any:
         try:
             return jsonify(runtime.cancel_camera_calibration())
-        except RuntimeError as exc:
-            return jsonify({"error": str(exc)}), 409
-
-    @app.post("/api/reference/known-angle-validation/start")
-    def reference_validation_start() -> Any:
-        try:
-            return jsonify(runtime.start_reference_validation())
-        except RuntimeError as exc:
-            return jsonify({"error": str(exc)}), 409
-
-    @app.post("/api/reference/known-angle-validation/capture")
-    def reference_validation_capture() -> Any:
-        try:
-            return jsonify(runtime.capture_reference_validation())
-        except RuntimeError as exc:
-            return jsonify({"error": str(exc)}), 409
-
-    @app.post("/api/reference/known-angle-validation/cancel")
-    def reference_validation_cancel() -> Any:
-        try:
-            return jsonify(runtime.cancel_reference_validation())
         except RuntimeError as exc:
             return jsonify({"error": str(exc)}), 409
 

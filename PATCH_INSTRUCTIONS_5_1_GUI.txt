@@ -1,0 +1,67 @@
+PATCH 5.1 — GUI LAYOUT CLEANUP
+==============================
+
+BASELINE
+--------
+Apply on the current CV_IMU Calibration Tool with Patch 5 already applied.
+This patch intentionally changes only the browser GUI file:
+
+  computer/vision_imu_calibration/web_app.py
+
+NO calibration, reference, IMU, Bayesian Optimization, protocol, recorder, or bridge logic is changed.
+
+WHAT CHANGES
+------------
+1. Removes the old whole-page auto-zoom that was shrinking all text/buttons to fit the viewport.
+2. Uses a real responsive three-column desktop layout instead:
+   - camera ~30%,
+   - live status/chart ~42%,
+   - controls ~28%.
+3. Keeps desktop page-level scrolling disabled; if the right control column ever exceeds the viewport, only that column can scroll.
+4. Makes low-priority controls collapsed by default:
+   - Manual recording / exports,
+   - IMU source / communication,
+   - Camera profile,
+   - IMU estimator details,
+   - Tag reference diagnostics,
+   - Runtime diagnostics.
+5. Keeps the important workflow visible:
+   - Guided IMU filter calibration,
+   - Reference camera calibration,
+   - One-time known-angle reference validation,
+   - live camera/reference/IMU status,
+   - live angle plot,
+   - recommendation/result.
+6. Slightly increases normal text/button readability.
+7. Smaller windows reflow into two/one columns instead of globally shrinking the complete UI.
+
+PATCH 5 COMPATIBILITY
+---------------------
+The replacement web_app.py includes the Patch 5 known-angle validation GUI/routes and the final 12-cycle dynamic guidance. It is intended as a direct replacement on the Patch 5 baseline.
+
+APPLY
+-----
+1. Extract this ZIP into the root of CV_IMU_Calib_tool.
+2. Replace the existing file when prompted.
+3. No files need to be deleted.
+4. Run:
+
+   13_BUILD_UNO_Q_PHASE2_APP.bat
+
+5. Import/open the rebuilt uno_q_phase2_app_ready.zip in Arduino App Lab.
+6. Run the App and hard-refresh the browser (Ctrl+F5).
+
+MANUAL ACCEPTANCE
+-----------------
+At desktop browser size (e.g. 1920x1080):
+- text/buttons should remain readable and not globally shrink,
+- camera should no longer dominate the page,
+- live plot should have the largest central working area,
+- calibration + one-time reference setup should be immediately visible,
+- advanced/rare controls should start collapsed,
+- opening a collapsed diagnostic section must not break any buttons/status fields,
+- no calibration behavior should change.
+
+ROLLBACK
+--------
+Restore the previous Patch 5 computer/vision_imu_calibration/web_app.py.
