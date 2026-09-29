@@ -1,0 +1,90 @@
+PATCH 5.2 — GUI WORKFLOW CLEANUP
+===============================
+
+BASELINE
+--------
+Apply on the current CV_IMU Calibration Tool with:
+- Patch 5 Finalization applied, and
+- Patch 5.1 GUI Layout Cleanup applied.
+
+This patch intentionally changes only:
+
+  computer/vision_imu_calibration/web_app.py
+
+No calibration science, Bayesian Optimization, reference geometry, IMU acquisition,
+Bridge, recorder, safety, protocol, or export backend logic is changed.
+
+WHAT CHANGES
+------------
+1. Reorders the right-side GUI to follow the actual user workflow from top to bottom:
+   1) Camera setup
+   2) Reference camera calibration
+   3) One-time tag reference validation
+   4) Guided IMU filter calibration
+
+2. Moves camera profile to the top setup step and adds explicit camera rotation control:
+   - 0°
+   - 90° clockwise
+   - 90° counter-clockwise
+   - 180°
+
+   Rotation uses the existing /api/tuning backend. If rotation changes, the existing
+   backend invalidates the previous camera calibration, so checkerboard calibration
+   must be repeated before the reference can become valid again.
+
+3. Removes development/secondary panels from the visible final-user workflow:
+   - Manual recording / exports
+   - IMU source / communication diagnostics
+   - IMU estimator details
+   - Reload IMU filter config
+   - Tag reference diagnostics
+   - Runtime diagnostics
+
+   Their backend/API behavior is NOT deleted. Hidden compatibility elements remain so
+   the current status/update JavaScript continues to operate without touching backend code.
+
+4. Keeps useful IMU readiness visible inside the Guided IMU calibration step:
+   - acquisition/connection state
+   - thigh ready / shank ready
+
+5. Makes the live posterior knee-angle graph substantially smaller:
+   - desktop height is capped to roughly 300–390 px instead of stretching to fill the
+     remaining vertical viewport.
+   - the graph remains responsive in smaller browser windows.
+
+6. Keeps the center-column recommendation/result panel unchanged.
+
+APPLY
+-----
+1. Extract this ZIP into the root of CV_IMU_Calib_tool.
+2. Replace the existing file when prompted:
+
+   computer/vision_imu_calibration/web_app.py
+
+3. No files need to be deleted.
+4. Run:
+
+   13_BUILD_UNO_Q_PHASE2_APP.bat
+
+5. Import/open the rebuilt uno_q_phase2_app_ready.zip in Arduino App Lab.
+6. Run the app.
+7. Hard-refresh the browser with Ctrl+F5.
+
+MANUAL ACCEPTANCE
+-----------------
+At desktop browser size:
+- the right column must begin with Camera setup,
+- checkerboard calibration must be directly below it,
+- known-angle validation must be below checkerboard calibration,
+- Guided IMU calibration must be below the one-time setup steps,
+- manual recording / runtime / tag diagnostics / estimator details must not be visible,
+- the live graph must be clearly smaller than in Patch 5.1,
+- camera rotation must apply and update the preview,
+- changing camera rotation must make the previous checkerboard setup require recalibration,
+- static/dynamic calibration buttons and result/export path must behave exactly as before.
+
+ROLLBACK
+--------
+Restore the Patch 5.1 version of:
+
+  computer/vision_imu_calibration/web_app.py

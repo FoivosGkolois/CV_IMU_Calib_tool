@@ -48,8 +48,8 @@ main {
   min-width:0;
   height:100%;
   display:grid;
-  grid-template-rows:auto minmax(260px,1fr) auto;
-  align-content:stretch;
+  grid-template-rows:auto auto auto;
+  align-content:start;
   gap:10px;
   overflow:hidden;
 }
@@ -134,16 +134,21 @@ button:disabled { opacity:.45; cursor:not-allowed; }
 .metric { background:var(--surface-2); border:1px solid #2a3952; border-radius:9px; padding:8px; min-width:0; }
 .metric .name { color:var(--muted); font-size:9.5px; text-transform:uppercase; letter-spacing:.07em; }
 .metric .number { margin-top:4px; font-size:16px; font-weight:700; overflow-wrap:anywhere; }
-.chart-card { padding:12px; min-height:0; height:auto; min-width:0; max-width:100%; overflow:hidden; }
+.chart-card { padding:12px; min-height:300px; height:clamp(300px,36vh,390px); min-width:0; max-width:100%; overflow:hidden; }
 .recommendation-card { padding:11px 12px; min-width:0; }
 .recommendation-values { margin-top:6px; color:#d8e3f4; font-size:11.5px; line-height:1.45; overflow-wrap:anywhere; }
-.chart-shell { height:calc(100% - 48px); min-height:190px; margin-top:8px; }
+.chart-shell { height:calc(100% - 48px); min-height:0; margin-top:8px; }
 .chart-shell canvas { width:100%; height:100%; display:block; background:#0a101a; border-radius:9px; }
 .calibration-card { border-color:#6f5b25; box-shadow:0 0 0 1px rgba(255,194,77,.10); }
 .calibration-actions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; margin-top:8px; }
 .calibration-actions button { min-height:38px; height:auto; padding:7px 9px; }
 .progress-track { height:7px; margin-top:8px; border-radius:999px; overflow:hidden; background:#0a101a; border:1px solid #2a3952; }
 .progress-fill { height:100%; width:0%; background:#39a0ff; transition:width .25s linear; }
+.setting-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-top:8px; }
+.setting-block { min-width:0; }
+.setting-block .subhead { margin-bottom:5px; }
+.workflow-sequence { color:#b8c8dc; font-size:10.5px; line-height:1.35; margin-top:6px; }
+.ui-internal { display:none !important; }
 .modal-backdrop { position:fixed; inset:0; z-index:1000; display:flex; align-items:center; justify-content:center; padding:18px; background:rgba(3,7,12,.86); }
 .modal-backdrop[hidden] { display:none; }
 .modal-card { width:min(560px,100%); background:#111925; border:1px solid #3a4e6c; border-radius:16px; padding:18px; box-shadow:0 24px 80px rgba(0,0,0,.5); }
@@ -174,6 +179,7 @@ footer { display:none; }
   .live-summary { grid-template-columns:repeat(2,minmax(0,1fr)); }
   .chart-card { min-height:300px; }
   .button-grid { grid-template-columns:1fr 1fr; }
+  .setting-grid { grid-template-columns:1fr; }
 }
 @media (max-width:480px) {
   .live-summary { grid-template-columns:1fr; }
@@ -207,52 +213,32 @@ footer { display:none; }
   </div>
 </section>
 <aside class="control-panel">
-  <div class="card priority wide calibration-card">
-    <div class="label">Guided IMU filter calibration</div>
-    <div id="calibrationState" class="value small">READY</div>
-    <div id="calibrationMessage" class="note">Start calibration with the static stage, then continue to the dynamic stage.</div>
-    <div class="progress-track"><div id="calibrationProgress" class="progress-fill"></div></div>
-    <div class="calibration-actions">
-      <button id="startStaticTest" class="primary" onclick="showCalibrationInstructions('static')">Start calibration</button>
-      <button id="startDynamicTest" class="primary" onclick="showCalibrationInstructions('dynamic')">Continue to dynamic calibration</button>
-      <button id="stopCalibrationTest" class="stop" onclick="stopCalibrationTest()">Stop current test</button>
-      <button id="cancelCalibrationTest" class="secondary" onclick="cancelCalibrationTest()">Cancel test</button>
+  <div class="card priority wide">
+    <div class="label">1 · Camera setup</div>
+    <div class="workflow-sequence">Set the camera profile and orientation first. If rotation changes, the checkerboard calibration must be repeated.</div>
+    <div class="setting-grid">
+      <div class="setting-block">
+        <div class="subhead">Camera profile</div>
+        <select id="cameraProfile"><option value="fast">Fast · 640×480</option><option value="quality">Quality · 1280×720</option></select>
+        <button id="applyCameraProfile" class="primary" style="margin-top:7px" onclick="setCameraProfile()">Apply profile</button>
+      </div>
+      <div class="setting-block">
+        <div class="subhead">Camera rotation</div>
+        <select id="cameraRotation">
+          <option value="none">0°</option>
+          <option value="clockwise_90">90° clockwise</option>
+          <option value="counterclockwise_90">90° counter-clockwise</option>
+          <option value="rotate_180">180°</option>
+        </select>
+        <button id="applyCameraRotation" class="primary" style="margin-top:7px" onclick="setCameraRotation()">Apply rotation</button>
+      </div>
     </div>
-    <a id="calibrationPath" class="path-link" href="/exports/calibration/" target="_blank" rel="noopener">Calibration files will be exported to calibration_suggestions.</a>
+    <div id="cameraProfileMessage" class="note"><b>Fast:</b> lower load. <b>Quality:</b> more detail at difficult angles.</div>
+    <div id="cameraRotationMessage" class="note">Choose the physical camera orientation before checkerboard calibration.</div>
   </div>
 
-  <details class="card compact wide">
-    <summary><span class="label">Manual recording / exports</span></summary>
-    <div style="margin-top:8px">
-    <div class="label">Recording</div>
-    <div id="recording" class="value small">IDLE</div>
-    <div class="button-grid">
-      <button id="startRecording" class="record" onclick="recordStart()">Start recording</button>
-      <button id="stopRecording" class="stop" onclick="recordStop()">Stop</button>
-    </div>
-    <a id="recordingPath" class="path-link" href="/exports/recordings/" target="_blank" rel="noopener">Video recordings are finalized as ZIP files inside video_recordings.</a>
-    </div>
-  </details>
-
-  <details class="card compact wide">
-    <summary><span class="label">IMU source / communication</span></summary>
-    <div style="margin-top:8px">
-    <div class="label">Raw IMU source</div>
-    <div id="imuState" class="value small">DISCONNECTED</div>
-    <div id="imuSerialControls">
-      <div class="inline-grid"><select id="imuPort"><option value="">Select COM port</option></select><button class="secondary" onclick="refreshImuPorts()">Refresh</button></div>
-      <div class="button-grid"><button id="imuConnect" class="primary" onclick="connectImu()">Connect</button><button id="imuDisconnect" class="stop" onclick="disconnectImu()">Disconnect</button></div>
-    </div>
-    <div id="imuMessage" class="note">Continuous 100 Hz acquisition; recording decides whether samples enter the final ZIP.</div>
-    <div id="imuRate" class="note">Rate: 0.0 Hz · Port: —</div>
-    <div id="imuSensors" class="note">Thigh: NOT READY · Shank: NOT READY</div>
-    <div id="imuHealth" class="note">Samples: 0 · Gaps: 0 · Parse errors: 0 · Queue drops: 0</div>
-    </div>
-  </details>
-
-
   <div class="card wide">
-    <div class="label">Reference camera calibration</div>
+    <div class="label">2 · Reference camera calibration</div>
     <div id="cameraCalibrationState" class="value small">IDLE</div>
     <div id="cameraCalibrationMessage" class="note">Use the printed 9×6 checkerboard before enabling the 3-D reference.</div>
     <div class="progress-track"><div id="cameraCalibrationProgress" class="progress-fill"></div></div>
@@ -264,9 +250,9 @@ footer { display:none; }
   </div>
 
   <div class="card wide">
-    <div class="label">One-time tag reference validation</div>
+    <div class="label">3 · One-time tag reference validation</div>
     <div id="referenceValidationState" class="value small">NOT PERFORMED</div>
-    <div id="referenceValidationMessage" class="note">After camera calibration, mount Tag 0 and Tag 1 on a rigid known-angle fixture.</div>
+    <div id="referenceValidationMessage" class="note">After camera calibration, mount Tag 0 and Tag 1 on the rigid known-angle fixture.</div>
     <div class="progress-track"><div id="referenceValidationProgress" class="progress-fill"></div></div>
     <div class="button-grid">
       <button id="startReferenceValidation" class="primary" onclick="referenceValidationStart()">Start known-angle validation</button>
@@ -276,42 +262,30 @@ footer { display:none; }
     <div id="referenceValidationQuality" class="note">Targets: 180°, 150°, 120°, 90° · 5 captures each · persistent result</div>
   </div>
 
-  <details class="card compact wide">
-    <summary><span class="label">Camera profile</span></summary>
-    <div style="margin-top:8px">
-    <select id="cameraProfile" style="margin-top:8px"><option value="fast">Fast · 640×480</option><option value="quality">Quality · 1280×720</option></select>
-    <button id="applyCameraProfile" class="primary" style="margin-top:8px" onclick="setCameraProfile()">Apply profile</button>
-    <div id="cameraProfileMessage" class="note"><b>Fast:</b> lower load. <b>Quality:</b> more detail at difficult angles.</div>
+  <div class="card priority wide calibration-card">
+    <div class="label">4 · Guided IMU filter calibration</div>
+    <div id="calibrationState" class="value small">READY</div>
+    <div id="calibrationMessage" class="note">Start calibration with the static stage, then continue to the dynamic stage.</div>
+    <div id="imuState" class="value small">DISCONNECTED</div>
+    <div id="imuSensors" class="note">Thigh: NOT READY · Shank: NOT READY</div>
+    <div class="progress-track"><div id="calibrationProgress" class="progress-fill"></div></div>
+    <div class="calibration-actions">
+      <button id="startStaticTest" class="primary" onclick="showCalibrationInstructions('static')">Start calibration</button>
+      <button id="startDynamicTest" class="primary" onclick="showCalibrationInstructions('dynamic')">Continue to dynamic calibration</button>
+      <button id="stopCalibrationTest" class="stop" onclick="stopCalibrationTest()">Stop current test</button>
+      <button id="cancelCalibrationTest" class="secondary" onclick="cancelCalibrationTest()">Cancel test</button>
     </div>
-  </details>
+    <a id="calibrationPath" class="path-link" href="/exports/calibration/" target="_blank" rel="noopener">Calibration files will be exported to calibration_suggestions.</a>
+  </div>
 
-  <details class="card compact wide">
-    <summary><span class="label">IMU estimator details</span></summary>
-    <div class="metric-grid">
-      <div class="metric"><div class="name">Visual − IMU</div><div id="angleDifference" class="number">--.-°</div></div>
-      <div class="metric"><div class="name">Knee speed</div><div id="imuSpeed" class="number">--.-°/s</div></div>
-      <div class="metric"><div class="name">Thigh / Shank</div><div id="segmentAngles" class="number">--.- / --.-°</div></div>
-      <div class="metric"><div class="name">State</div><div class="number">Live</div></div>
-    </div>
-    <button id="reloadImuFilter" class="secondary" style="margin-top:8px" onclick="reloadFilterConfig()">Reload IMU filter config</button>
-    <div id="imuFilterInfo" class="note">Waiting for synchronized raw IMU samples.</div>
-  </details>
-
-  <details class="card compact wide">
-    <summary><span class="label">Tag reference diagnostics</span></summary>
-    <div id="thighTagState" class="note">Thigh · Tag 0: NOT DETECTED</div>
-    <div id="shankTagState" class="note">Shank · Tag 1: NOT DETECTED</div>
-    <div id="referenceQuality" class="note">3-D pose quality: waiting for calibrated camera setup.</div>
-    <div class="note">The calibrated 3-D relative-angle geometry uses the persistent checkerboard camera setup and fixed quality gates.</div>
-  </details>
-
-  <details class="card compact wide">
-    <summary><span class="label">Runtime diagnostics</span></summary>
-    <div id="runtime" class="value small">STARTING</div>
-    <div id="backend" class="note">Backend: AprilTag 36h11</div>
-    <div id="source" class="note">Source: —</div>
-    <div id="frameCount" class="note">Frames: 0</div>
-  </details>
+  <!-- Backend/developer functions remain available but are intentionally not part of the final user workflow. -->
+  <div class="ui-internal" aria-hidden="true">
+    <div id="recording"></div><button id="startRecording"></button><button id="stopRecording"></button><a id="recordingPath"></a>
+    <div id="imuRate"></div><div id="imuHealth"></div><div id="imuSerialControls"><select id="imuPort"><option value=""></option></select><button id="imuConnect"></button><button id="imuDisconnect"></button></div><div id="imuMessage"></div>
+    <div id="angleDifference"></div><div id="imuSpeed"></div><div id="segmentAngles"></div><div id="imuFilterInfo"></div><button id="reloadImuFilter"></button>
+    <div id="thighTagState"></div><div id="shankTagState"></div><div id="referenceQuality"></div>
+    <div id="runtime"></div><div id="backend"></div><div id="source"></div><div id="frameCount"></div>
+  </div>
 </aside>
 </main>
 <footer>Final protocol · validated two-tag reference · physics-based static calibration · GP Bayesian Optimization · held-out validation.</footer>
@@ -373,6 +347,9 @@ const imuMessage=document.getElementById('imuMessage');
 const cameraProfile=document.getElementById('cameraProfile');
 const applyCameraProfile=document.getElementById('applyCameraProfile');
 const cameraProfileMessage=document.getElementById('cameraProfileMessage');
+const cameraRotation=document.getElementById('cameraRotation');
+const applyCameraRotation=document.getElementById('applyCameraRotation');
+const cameraRotationMessage=document.getElementById('cameraRotationMessage');
 const referenceValidationState=document.getElementById('referenceValidationState');
 const referenceValidationMessage=document.getElementById('referenceValidationMessage');
 const referenceValidationProgress=document.getElementById('referenceValidationProgress');
@@ -454,6 +431,18 @@ async function setCameraProfile(){
     cameraProfileMessage.textContent=`Applied ${body.profile}: ${body.width}×${body.height} @ ${Number(body.fps).toFixed(0)} FPS.`;
   } catch(e) { cameraProfileMessage.textContent='Camera profile failed: '+e; }
   finally { applyCameraProfile.disabled=false; setTimeout(resizeVideoShell,350); }
+}
+async function setCameraRotation(){
+  applyCameraRotation.disabled=true;
+  cameraRotationMessage.textContent='Applying camera rotation…';
+  try {
+    const r=await fetch('/api/tuning',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({frame_rotation:cameraRotation.value})});
+    const body=await r.json();
+    if(!r.ok) throw new Error(body.error||'rotation change failed');
+    cameraRotation.value=body.frame_rotation||cameraRotation.value;
+    cameraRotationMessage.textContent='Rotation applied. If the rotation changed, run checkerboard calibration again.';
+  } catch(e) { cameraRotationMessage.textContent='Camera rotation failed: '+e; }
+  finally { applyCameraRotation.disabled=false; setTimeout(resizeVideoShell,350); }
 }
 async function cameraCalibrationStart(){
   cameraCalibrationMessage.textContent='Starting checkerboard capture…';
@@ -675,6 +664,8 @@ async function refresh(){
     if(imu.port && [...imuPort.options].some(o=>o.value===imu.port)) imuPort.value=imu.port;
     const camera=s.camera||{};
     if(!window.cameraProfileLoaded && camera.profile){ cameraProfile.value=camera.profile; window.cameraProfileLoaded=true; }
+    const tuning=s.tuning||{};
+    if(!window.cameraRotationLoaded && tuning.frame_rotation){ cameraRotation.value=tuning.frame_rotation; window.cameraRotationLoaded=true; }
     const camCal=s.camera_calibration||{};
     cameraCalibrationState.textContent=String(camCal.state||'IDLE').replaceAll('_',' ');
     cameraCalibrationState.className='value small '+(camCal.state==='COMPLETE'?'ok':(camCal.state==='FAILED'?'bad':''));
@@ -702,7 +693,9 @@ async function refresh(){
     startReferenceValidation.disabled=Boolean(refVal.active)||cameraCalibrationBusy||Boolean((s.recording||{}).active)||calibrationLocked||camCal.persistent_state!=='LOADED';
     captureReferenceValidation.disabled=!Boolean(refVal.active)||!Boolean(s.tracking_valid);
     cancelReferenceValidation.disabled=!Boolean(refVal.active);
-    applyCameraProfile.disabled=Boolean((s.recording||{}).active)||calibrationLocked||cameraCalibrationBusy||Boolean(refVal.active)||camera.reconfigurable===false||!['CAMERA_PREVIEW','RUNNING','REFERENCE_FAILED'].includes(s.state);
+    const cameraSettingsLocked=Boolean((s.recording||{}).active)||calibrationLocked||cameraCalibrationBusy||Boolean(refVal.active)||camera.reconfigurable===false||!['CAMERA_PREVIEW','RUNNING','REFERENCE_FAILED'].includes(s.state);
+    applyCameraProfile.disabled=cameraSettingsLocked;
+    applyCameraRotation.disabled=cameraSettingsLocked;
     const cal=s.calibration||{};
     calibrationState.textContent=String(cal.state||'IDLE').replaceAll('_',' ');
     calibrationState.className='value small '+(cal.valid?'ok':(cal.state==='FAILED'||cal.state==='INVALID'?'bad':''));
