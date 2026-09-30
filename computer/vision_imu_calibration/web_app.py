@@ -67,17 +67,19 @@ main {
   justify-content:center;
 }
 .video-shell img { width:100%; height:100%; object-fit:contain; display:block; }
-.live-summary { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; align-items:start; }
+.live-summary { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; align-items:start; }
 .summary-card, .card, .chart-card { background:var(--surface); border:1px solid var(--line); border-radius:12px; }
 .summary-card { padding:10px 12px; min-width:0; max-width:100%; overflow:visible; }
 .summary-card .value { font-size:clamp(18px,1.2vw,22px); }
+.reference-meta { display:flex; justify-content:space-between; gap:10px; margin-top:5px; color:var(--muted); }
+.ref-tag-status { font-weight:700; }
 .control-panel {
   min-width:0;
   min-height:0;
   max-height:100%;
   display:grid;
   align-content:start;
-  gap:9px;
+  gap:7px;
   overflow-y:auto;
   overflow-x:hidden;
   padding-right:3px;
@@ -134,7 +136,7 @@ button:disabled { opacity:.45; cursor:not-allowed; }
 .metric { background:var(--surface-2); border:1px solid #2a3952; border-radius:9px; padding:8px; min-width:0; }
 .metric .name { color:var(--muted); font-size:9.5px; text-transform:uppercase; letter-spacing:.07em; }
 .metric .number { margin-top:4px; font-size:16px; font-weight:700; overflow-wrap:anywhere; }
-.chart-card { padding:12px; min-height:300px; height:clamp(300px,36vh,390px); min-width:0; max-width:100%; overflow:hidden; }
+.chart-card { padding:11px 12px; min-height:220px; height:clamp(220px,25vh,280px); min-width:0; max-width:100%; overflow:hidden; }
 .recommendation-card { padding:11px 12px; min-width:0; }
 .recommendation-values { margin-top:6px; color:#d8e3f4; font-size:11.5px; line-height:1.45; overflow-wrap:anywhere; }
 .chart-shell { height:calc(100% - 48px); min-height:0; margin-top:8px; }
@@ -147,7 +149,15 @@ button:disabled { opacity:.45; cursor:not-allowed; }
 .setting-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-top:8px; }
 .setting-block { min-width:0; }
 .setting-block .subhead { margin-bottom:5px; }
-.workflow-sequence { color:#b8c8dc; font-size:10.5px; line-height:1.35; margin-top:6px; }
+.workflow-sequence { color:#b8c8dc; font-size:10.5px; line-height:1.28; margin-top:4px; }
+.control-panel .card { padding:9px 10px; }
+.control-panel .value { margin-top:3px; }
+.control-panel .note { margin-top:4px; line-height:1.30; }
+.control-panel select, .control-panel button { height:34px; }
+.control-panel .button-grid, .control-panel .calibration-actions { gap:6px; margin-top:6px; }
+.control-panel .progress-track { margin-top:6px; }
+.control-panel .setting-grid { gap:7px; margin-top:6px; }
+.control-panel .setting-block .subhead { margin-bottom:4px; }
 .ui-internal { display:none !important; }
 .modal-backdrop { position:fixed; inset:0; z-index:1000; display:flex; align-items:center; justify-content:center; padding:18px; background:rgba(3,7,12,.86); }
 .modal-backdrop[hidden] { display:none; }
@@ -177,7 +187,7 @@ footer { display:none; }
   .camera-column, .live-column { height:auto; min-height:0; }
   .control-panel { grid-template-columns:1fr; }
   .live-summary { grid-template-columns:repeat(2,minmax(0,1fr)); }
-  .chart-card { min-height:300px; }
+  .chart-card { min-height:220px; }
   .button-grid { grid-template-columns:1fr 1fr; }
   .setting-grid { grid-template-columns:1fr; }
 }
@@ -195,10 +205,14 @@ footer { display:none; }
 </section>
 <section class="live-column">
   <div class="live-summary">
-    <div class="summary-card"><div class="label">Tag reference</div><div id="tracking" class="value">Starting…</div><div id="reason" class="small">Initializing camera and tag detector</div></div>
+    <div class="summary-card">
+      <div class="label">Reference</div>
+      <div id="tracking" class="value">Starting…</div>
+      <div id="reason" class="small">Initializing camera and tag detector</div>
+      <div class="reference-meta small"><span>Tags <span id="tagStatus" class="ref-tag-status">0 / 2</span></span><span id="fps">0.0 FPS</span></div>
+    </div>
     <div class="summary-card"><div class="label">Reference angle</div><div id="angle" class="value">--.-°</div><div id="referenceNote" class="small">Camera calibration required</div></div>
     <div class="summary-card"><div class="label">IMU angle</div><div id="imuAngle" class="value">--.-°</div><div id="imuEstimatorState" class="small">NO SAMPLE</div></div>
-    <div class="summary-card"><div class="label">Tags</div><div id="tagStatus" class="value">0 / 2</div><div id="fps" class="small">0.0 FPS</div></div>
   </div>
   <div class="chart-card">
     <div class="label">Live posterior knee-angle presentation · last 15 s</div>
@@ -623,7 +637,7 @@ async function refresh(){
     referenceNote.textContent=s.tracking_valid?'Calibrated 3-D tag reference':(referenceConfig.setup_required?'Camera calibration required':'Reference quality gate failed');
     const detected=Number(Boolean(s.thigh_tag_detected))+Number(Boolean(s.shank_tag_detected));
     tagStatus.textContent=detected+' / 2';
-    tagStatus.className='value '+(detected===2?'ok':'bad');
+    tagStatus.className='ref-tag-status '+(detected===2?'ok':'bad');
     thighTagState.textContent='Thigh · Tag 0: '+(s.thigh_tag_detected?'DETECTED':'NOT DETECTED');
     thighTagState.className='note '+(s.thigh_tag_detected?'ok':'bad');
     shankTagState.textContent='Shank · Tag 1: '+(s.shank_tag_detected?'DETECTED':'NOT DETECTED');

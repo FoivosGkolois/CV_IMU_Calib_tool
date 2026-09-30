@@ -1,0 +1,45 @@
+PATCH 5.3 — FINAL GUI DENSITY / WORKFLOW POLISH
+
+BASELINE
+- Apply on top of Patch 5.2 GUI Workflow Cleanup.
+- No backend, calibration science, protocol, Bridge, recording, or camera-processing logic is changed.
+
+CHANGES
+1. Keep the camera preview behaviour exactly as in Patch 5.2.
+   - No aspect-ratio/object-fit change in this patch.
+2. Reduce the live posterior knee-angle graph height.
+3. Merge TAG REFERENCE + TAGS into one compact REFERENCE status card.
+   - The card still shows VALID/INVALID, reason, tag count, and processing FPS.
+4. Keep Reference angle and IMU angle as separate cards.
+5. Preserve the right-side workflow order:
+   1 Camera setup
+   2 Reference camera calibration
+   3 One-time tag reference validation
+   4 Guided IMU filter calibration
+6. Make the right workflow column slightly denser so more of the complete workflow is visible without scrolling.
+
+FILES TO REPLACE
+- computer/vision_imu_calibration/web_app.py
+
+FILES TO DELETE
+- None.
+
+VALIDATION RUN
+- Python compile: PASS
+- JavaScript syntax check: PASS
+- Camera preview CSS unchanged relative to Patch 5.2: PASS
+
+HARDWARE / MANUAL CHECK
+1. Replace the file above.
+2. Run 13_BUILD_UNO_Q_PHASE2_APP.bat.
+3. Import/run the newly generated App Lab ZIP.
+4. Hard-refresh browser (Ctrl+F5).
+5. Confirm:
+   - camera preview behaves exactly as before,
+   - top status row contains 3 cards,
+   - graph is visibly shorter,
+   - right workflow remains ordered 1→4,
+   - buttons/statuses still update normally.
+
+GIT COMMIT TITLE
+fix(gui): compact final calibration workflow layout

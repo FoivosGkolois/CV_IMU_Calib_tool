@@ -1,0 +1,2 @@
+e1f379232b26b96479eac970913cd2bf35c410bcce52a2ad462cb567b2ba33b2  computer/vision_imu_calibration/web_app.py
+66e936654a2dd0431e99fd29d14adf9ade8cdfdd2d7651afeb67b10879f290b9  PATCH_INSTRUCTIONS_5_3_GUI.txt
