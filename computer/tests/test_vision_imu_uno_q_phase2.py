@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
 import zipfile
 
@@ -68,6 +70,16 @@ def test_phase2_builder_creates_self_contained_app_payload(tmp_path: Path) -> No
         in names
     )
     assert not any("__pycache__" in name or name.endswith(".pyc") for name in names)
+    with zipfile.ZipFile(archive) as bundle:
+        build_info = json.loads(
+            bundle.read("uno_q_phase2_app_ready/python/project/BUILD_INFO.json")
+        )
+        manifest = bundle.read("uno_q_phase2_app_ready/MANIFEST_SHA256.txt").decode("utf-8")
+    assert build_info["schema_version"] == 1
+    assert len(build_info["python_source_sha256"]) == 64
+    assert build_info["requirements_sha256"] == ""  # fixture has no requirements file
+    assert build_info["mcu_sketch_sha256"] == hashlib.sha256(b"void setup(){}\n").hexdigest()
+    assert "python/project/BUILD_INFO.json" in manifest
 
 
 def test_cli_accepts_explicit_camera_index_and_v4l2_backend() -> None:

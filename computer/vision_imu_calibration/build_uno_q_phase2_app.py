@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import shutil
+import subprocess
 import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -41,6 +44,19 @@ def build_app(project_root: Path, output_dir: Path) -> Path:
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo"),
     )
 
+    # Record exactly what was packaged, even when source changes are uncommitted.
+    build_info = {
+        "schema_version": 1,
+        "built_utc": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+        "git_commit": _git_commit(project_root),
+        "python_source_sha256": _tree_sha256(computer_root / "vision_imu_calibration"),
+        "requirements_sha256": _file_sha256(ready_dir / "python" / "requirements.txt"),
+        "mcu_sketch_sha256": _file_sha256(ready_dir / "sketch" / "sketch.ino"),
+    }
+    (payload_root / "BUILD_INFO.json").write_text(
+        json.dumps(build_info, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+
     manifest_lines: list[str] = []
     for path in sorted(p for p in ready_dir.rglob("*") if p.is_file()):
         relative = path.relative_to(ready_dir).as_posix()
@@ -55,6 +71,31 @@ def build_app(project_root: Path, output_dir: Path) -> Path:
         for path in sorted(p for p in ready_dir.rglob("*") if p.is_file()):
             archive.write(path, arcname=f"uno_q_phase2_app_ready/{path.relative_to(ready_dir).as_posix()}")
     return archive_path
+
+
+def _file_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else ""
+
+
+def _tree_sha256(root: Path) -> str:
+    digest = hashlib.sha256()
+    for path in sorted(p for p in root.rglob("*") if p.is_file()):
+        digest.update(path.relative_to(root).as_posix().encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def _git_commit(project_root: Path) -> str:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=project_root,
+            capture_output=True, text=True, check=True, timeout=3,
+        )
+        return result.stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return ""
 
 
 def main(argv: list[str] | None = None) -> int:
