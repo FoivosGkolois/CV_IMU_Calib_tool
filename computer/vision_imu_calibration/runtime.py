@@ -846,10 +846,12 @@ class VisionRuntime:
                     try:
                         pose_frame = self.estimator.estimate(frame, timestamp_ms)
                         raw_leg = pose_frame.leg(tuning.leg_side) if pose_frame is not None else None
+                        image_aspect_ratio = float(frame.shape[1]) / float(frame.shape[0])
                         raw_angle = calculate_knee_flexion_deg(
                             raw_leg,
                             confidence_threshold=tuning.confidence_threshold,
                             min_segment_length=tuning.min_segment_length,
+                            image_aspect_ratio=image_aspect_ratio,
                         )
 
                         if raw_leg is None or not raw_angle.valid:
@@ -871,6 +873,7 @@ class VisionRuntime:
                                 leg,
                                 confidence_threshold=tuning.confidence_threshold,
                                 min_segment_length=tuning.min_segment_length,
+                                image_aspect_ratio=image_aspect_ratio,
                             )
                             filtered_angle, smoothed_angle = self._filter_angle(
                                 smoothed_geometry,

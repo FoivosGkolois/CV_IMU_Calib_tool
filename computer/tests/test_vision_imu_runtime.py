@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from computer.vision_imu_calibration.geometry import KneeAngleResult
+from computer.vision_imu_calibration.models import Landmark, PoseFrame
 from computer.vision_imu_calibration.runtime import RuntimeStatus, VisionRuntime
 
 
@@ -95,6 +96,50 @@ class PreviewCamera:
 
     def close(self) -> None:
         self.closed = True
+
+
+class FixedObliquePoseEstimator:
+    """Return a 90-degree knee angle in pixel space on any frame shape."""
+
+    def open(self) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
+    def estimate(self, frame, timestamp_ms: int) -> PoseFrame:
+        height, width = frame.shape[:2]
+        def point(x: float, y: float) -> Landmark:
+            return Landmark(x=x, y=y, visibility=1.0, presence=1.0)
+        return PoseFrame(
+            timestamp_ms=timestamp_ms,
+            landmarks={
+                # The runtime's RIGHT leg resolves to the MoveNet LEFT chain.
+                "left_hip": point(0.5 + 30.0 / width, 0.5 - 30.0 / height),
+                "left_knee": point(0.5, 0.5),
+                "left_ankle": point(0.5 + 30.0 / width, 0.5 + 30.0 / height),
+            },
+        )
+
+
+def test_runtime_corrects_raw_and_filtered_angles_for_camera_aspect_ratio(tmp_path: Path) -> None:
+    runtime = VisionRuntime(
+        PreviewCamera(), FixedObliquePoseEstimator(), recording_root=tmp_path
+    )  # type: ignore[arg-type]
+    runtime.start()
+    try:
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            status = runtime.status()
+            if status["tracking_valid"]:
+                assert status["raw_knee_angle_deg"] == pytest.approx(90.0, abs=1e-7)
+                assert status["visual_knee_angle_deg"] == pytest.approx(90.0, abs=1e-7)
+                break
+            time.sleep(0.01)
+        else:
+            pytest.fail(f"No valid pose measurement: {runtime.status()}")
+    finally:
+        runtime.stop()
 
 
 class BlockingEstimator:

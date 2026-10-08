@@ -36,6 +36,38 @@ def test_right_angle_is_ninety_degrees() -> None:
     assert result.angle_deg == pytest.approx(90.0, abs=1e-9)
 
 
+@pytest.mark.parametrize("width,height", [(640, 480), (1280, 720), (480, 640)])
+def test_oblique_right_angle_is_resolution_independent(width: int, height: int) -> None:
+    # Both segments are diagonal and perpendicular in pixel coordinates.
+    knee_x, knee_y = 0.5, 0.5
+    offset_px = 90.0
+    subject = leg(
+        (knee_x + offset_px / width, knee_y - offset_px / height),
+        (knee_x, knee_y),
+        (knee_x + offset_px / width, knee_y + offset_px / height),
+    )
+    corrected = calculate_knee_flexion_deg(subject, image_aspect_ratio=width / height)
+    assert corrected.valid
+    assert corrected.angle_deg == pytest.approx(90.0, abs=1e-9)
+
+
+def test_oblique_angle_requires_real_image_aspect_ratio() -> None:
+    subject = leg((0.6, 0.3), (0.5, 0.5), (0.6, 0.7))
+    corrected = calculate_knee_flexion_deg(subject, image_aspect_ratio=2.0)
+    legacy = calculate_knee_flexion_deg(subject)
+    assert corrected.angle_deg == pytest.approx(90.0, abs=1e-9)
+    assert legacy.angle_deg != pytest.approx(90.0, abs=1.0)
+
+
+@pytest.mark.parametrize("bad_ratio", [0.0, -1.0, float("nan"), float("inf")])
+def test_invalid_image_aspect_ratio_is_rejected(bad_ratio: float) -> None:
+    with pytest.raises(ValueError, match="image_aspect_ratio"):
+        calculate_knee_flexion_deg(
+            leg((0.5, 0.2), (0.5, 0.5), (0.5, 0.8)),
+            image_aspect_ratio=bad_ratio,
+        )
+
+
 def test_mirroring_does_not_change_angle() -> None:
     left = calculate_knee_flexion_deg(leg((0.4, 0.2), (0.4, 0.5), (0.7, 0.65)))
     right = calculate_knee_flexion_deg(leg((0.6, 0.2), (0.6, 0.5), (0.3, 0.65)))
