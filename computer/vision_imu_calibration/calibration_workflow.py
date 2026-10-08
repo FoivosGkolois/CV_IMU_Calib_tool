@@ -775,6 +775,85 @@ def _derive_static_parameters(
     }
 
 
+
+def _derive_physics_static_parameters(
+    data: ArchiveData,
+    base_parameters: KneeAngleFilterParameters,
+) -> dict[str, Any]:
+    """Compute a *candidate* static IMU calibration without camera readings.
+
+    Assumes the operator held the leg stationary in full extension and both IMUs
+    are mounted consistently. The result is not an independently verified knee
+    angle; static quality gates must pass before the active workflow uses it.
+
+    Deliberately not called by the current calibration workflow (T05a).
+    """
+    if not data.raw_rows:
+        raise RuntimeError("Static test contains no raw IMU samples")
+
+    straight_offsets: list[float] = []
+    thigh_rates: list[float] = []
+    shank_rates: list[float] = []
+    for row in data.raw_rows:
+        thigh_acc = _static_acceleration_angle_deg(row, "thigh", base_parameters)
+        shank_acc = _static_acceleration_angle_deg(row, "shank", base_parameters)
+        thigh_segment = thigh_acc - base_parameters.thigh_offset_deg
+        shank_segment = shank_acc - base_parameters.shank_offset_deg
+        relative = (shank_segment - thigh_segment + 180.0) % 360.0 - 180.0
+        straight_offsets.append(base_parameters.relative_angle_sign * relative)
+        thigh_rates.append(_signed_axis_rate(row, "thigh", base_parameters))
+        shank_rates.append(_signed_axis_rate(row, "shank", base_parameters))
+
+    thigh_bias = statistics.median(thigh_rates)
+    shank_bias = statistics.median(shank_rates)
+    thigh_residuals = [rate - thigh_bias for rate in thigh_rates]
+    shank_residuals = [rate - shank_bias for rate in shank_rates]
+    thigh_noise_sigma = _static_robust_sigma(thigh_residuals)
+    shank_noise_sigma = _static_robust_sigma(shank_residuals)
+    deadband = min(2.5, max(0.05, 3.0 * max(thigh_noise_sigma, shank_noise_sigma)))
+    straight_offset = statistics.median(straight_offsets)
+
+    parameters = replace(
+        base_parameters,
+        straight_leg_offset_deg=straight_offset,
+        thigh_gyro_bias_deg_s=thigh_bias,
+        shank_gyro_bias_deg_s=shank_bias,
+        gyro_deadband_deg_s=deadband,
+    )
+    parameters.validate()
+    return {
+        "parameters": parameters,
+        "physical_reference_condition": "assumed_full_extension",
+        "straight_leg_offset_deg": straight_offset,
+        "straight_leg_offset_std_deg": statistics.pstdev(straight_offsets) if len(straight_offsets) > 1 else 0.0,
+        "thigh_gyro_bias_deg_s": thigh_bias,
+        "shank_gyro_bias_deg_s": shank_bias,
+        "thigh_gyro_noise_sigma_deg_s": thigh_noise_sigma,
+        "shank_gyro_noise_sigma_deg_s": shank_noise_sigma,
+        "gyro_deadband_deg_s": deadband,
+        "sample_count": len(data.raw_rows),
+        "used_visual_reference": False,
+    }
+
+
+def _static_acceleration_angle_deg(
+    row: Mapping[str, str], prefix: str, parameters: KneeAngleFilterParameters,
+) -> float:
+    ax, ay, az = (float(row[f"{prefix}_{axis}_g"]) for axis in ("ax", "ay", "az"))
+    if parameters.rotation_axis == 0:
+        axis_1, axis_2 = parameters.acc_axis_1_sign * ay, parameters.acc_axis_2_sign * az
+    elif parameters.rotation_axis == 2:
+        axis_1, axis_2 = parameters.acc_axis_1_sign * ay, parameters.acc_axis_2_sign * ax
+    else:
+        axis_1, axis_2 = parameters.acc_axis_1_sign * az, parameters.acc_axis_2_sign * ax
+    return math.degrees(math.atan2(axis_1, axis_2))
+
+
+def _static_robust_sigma(values: Sequence[float]) -> float:
+    median = statistics.median(values)
+    return 1.4826 * statistics.median(abs(value - median) for value in values)
+
+
 def _candidate_parameters(
     static_parameters: KneeAngleFilterParameters,
 ) -> list[KneeAngleFilterParameters]:
