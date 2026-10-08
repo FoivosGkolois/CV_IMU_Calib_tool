@@ -188,7 +188,7 @@ void captureIfDue() {
 }  // namespace
 
 void setup() {
-  Bridge.begin();
+  Bridge.begin(921600UL);
   g_bridge_ready = true;
   initializeImus();
   Bridge.provide_safe("vision_imu_start_capture", startCapture);
