@@ -6,19 +6,18 @@ from computer.vision_imu_calibration.tuning import FrameRotation, RuntimeTuning
 from computer.vision_imu_calibration.web_app import _PAGE
 
 
-def test_workflow_has_five_ordered_single_open_primary_steps() -> None:
+def test_workflow_has_four_ordered_single_open_primary_steps() -> None:
     step_ids = re.findall(
         r'<details id="([^"]+)" class="card workflow-step[^"]*"[^>]*data-workflow-step[^>]*>',
         _PAGE,
     )
     assert step_ids == [
         "cameraSetupStep",
-        "positionStep",
         "calibrationStep",
         "validationStep",
         "resultsStep",
     ]
-    assert _PAGE.count("data-workflow-step") == 5
+    assert _PAGE.count("data-workflow-step") == 4
     assert 'id="referencePanel" class="card auxiliary-panel" data-focus-panel' in _PAGE
     assert _PAGE.count("data-focus-panel open") == 1
 
@@ -38,11 +37,23 @@ def test_camera_remains_prominent_and_uncropped_outside_workflow() -> None:
     assert ".visual-column { position:sticky" in _PAGE
     assert ".video-shell img { width:100%; height:100%; object-fit:contain" in _PAGE
     assert "videoShell.style.aspectRatio=String(naturalWidth/naturalHeight)" in _PAGE
-    assert "max-height:88vh" in _PAGE
+    assert "max-height:100%" in _PAGE
     assert "@media (max-width:1100px)" in _PAGE
     assert "@media (max-width:760px)" in _PAGE
     assert "position:fixed; inset:0" not in _PAGE
     assert 'aria-modal="true"' not in _PAGE
+
+
+def test_compact_status_and_collapsible_chart_preserve_camera_space() -> None:
+    visual = _PAGE.split('<section class="visual-column"', 1)[1].split('</section>', 1)[0]
+    controls = _PAGE.split('<aside class="control-panel">', 1)[1]
+    assert 'id="angleChart"' not in visual
+    assert controls.index('id="liveChartPanel"') < controls.index('id="imuReadySummary"')
+    assert '<details id="liveChartPanel" class="chart-card">' in controls
+    assert "grid-template-rows:repeat(4,auto)" in _PAGE
+    assert "grid-template-rows:minmax(0,1fr) clamp(210px,28vh,290px)" not in _PAGE
+    assert "liveChartPanel.addEventListener('toggle'" in _PAGE
+    assert "observer.observe(angleChart.parentElement);" in _PAGE
 
 
 def test_five_pose_sliders_live_only_under_advanced_and_defaults_are_unchanged() -> None:
@@ -83,9 +94,6 @@ def test_five_pose_sliders_live_only_under_advanced_and_defaults_are_unchanged()
 
 def test_focused_controls_keep_ids_endpoints_blinding_and_exports() -> None:
     required_ids = {
-        "referenceSetup",
-        "referenceMeasured",
-        "referenceConfirm",
         "referenceCapture",
         "calibrationModal",
         "calibrationCountdown",
@@ -118,9 +126,13 @@ def test_focused_controls_keep_ids_endpoints_blinding_and_exports() -> None:
     assert "class=\"inline-guidance\" hidden" in _PAGE
     assert 'id="calibrationSetup"' not in _PAGE
     assert 'id="sideOn"' not in _PAGE
-    assert "positionAction('check')" in _PAGE
-    assert "positionAction('start')" not in _PAGE
-    assert "positionAction('finish')" not in _PAGE
+    assert "positionAction('check')" not in _PAGE
+    assert 'id="positionStep"' not in _PAGE
+    assert "referenceAction('start_session')" in _PAGE
+    assert "referenceAction('next')" in _PAGE
+    assert 'id="referenceMeasured"' not in _PAGE
+    assert 'id="referenceConfirm"' not in _PAGE
+    assert 'id="savedReference"' not in _PAGE
 
 
 def test_every_literal_javascript_dom_lookup_has_a_matching_element() -> None:

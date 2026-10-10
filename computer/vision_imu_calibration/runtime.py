@@ -184,6 +184,9 @@ class VisionRuntime:
         self._reference = {"state": "IDLE", "message": "Optional laboratory validation",
                            "hide_angle": False, "result": None, "reused_capture_id": ""}
         self._reference_inputs: dict[str, Any] = {}
+        self._guided_reference: dict[str, Any] | None = None
+        self._landmark_scores: dict[str, float | None] = {"hip": None, "knee": None, "ankle": None}
+        self._pose_tuning_history: deque[dict[str, Any]] = deque(maxlen=1200)
         self._reference_samples: list[dict[str, Any]] = []
         self._reference_cancel = threading.Event()
         self._reference_thread: threading.Thread | None = None
@@ -373,12 +376,46 @@ class VisionRuntime:
                 raise ValueError("Positioning action must be check, show, start, or finish")
             return self._positioning.snapshot()
 
+    def _guided_snapshot(self) -> dict[str, Any] | None:
+        session = self._guided_reference
+        if session is None:
+            return None
+        index = session["index"]
+        targets = session["targets"]
+        captures = session["captures"]
+        return {"session_id": session["id"], "index": index, "total": len(targets),
+                "target_deg": targets[index] if index < len(targets) else None,
+                "repeat": (index % 2) + 1 if index < len(targets) else None,
+                "captures": list(captures), "complete": index == len(targets),
+                "report_url": session.get("report_url", "")}
+
+    def _prepare_guided_point(self) -> None:
+        session = self._guided_reference
+        if session is None or session["index"] >= len(session["targets"]):
+            raise RuntimeError("No pending guided goniometer position")
+        index = session["index"]
+        target = session["targets"][index]
+        self._reference_inputs = {
+            "capture_id": uuid.uuid4().hex,
+            "target_deg": target,
+            "reference_angle_deg": float(target),
+            "setup": "guided:" + session["id"],
+            "profile": session["profile"],
+            "reference_method": "operator_positioned_with_physical_goniometer_at_requested_reference",
+            "session_id": session["id"],
+            "repeat_index": (index % 2) + 1,
+        }
+        self._reference.update(state="ENTRY", hide_angle=True, result=None,
+                               reused_capture_id="",
+                               message=f"Position leg at {target}° using the physical goniometer, then Capture")
+        self._latest_jpeg = None
+
     def reference_status(self) -> dict[str, Any]:
         with self._lock:
             compatible = [r for r in self._reference_captures
                           if r.get("setup") == self._reference_inputs.get("setup")
                           and r.get("profile") == self._vision_setup()]
-            return {**self._reference, "captures": list(self._reference_captures),
+            return {**self._reference, "guided": self._guided_snapshot(), "captures": list(self._reference_captures),
                     "load_errors": list(self._reference_load_errors),
                     "repeatability": guided_repeatability(compatible),
                     "repeatability_scope": "current described setup and exact camera/pose profile"}
@@ -387,14 +424,35 @@ class VisionRuntime:
         with self._calibration_action_lock, self._lock:
             if self._reference_busy():
                 raise RuntimeError("Wait for the current goniometer hold to finish")
-            if action == "cancel":
+            if action == "start_session":
+                if self.recorder.status().active or self._calibration_locked():
+                    raise RuntimeError("Finish recording or calibration before guided validation")
+                self._guided_reference = {
+                    "id": uuid.uuid4().hex,
+                    "targets": tuple(v for target in GONIOMETER_TARGETS for v in (target, target)),
+                    "index": 0, "captures": [], "profile": self._vision_setup(),
+                }
+                self._prepare_guided_point()
+            elif action == "next":
+                if self._guided_reference is None:
+                    raise RuntimeError("Start the guided static check first")
+                if self._reference["state"] not in {"MEASURED", "RETRY"}:
+                    raise RuntimeError("Finish or retry the current position first")
+                if self._guided_reference["index"] >= len(self._guided_reference["targets"]):
+                    raise RuntimeError("All ten measurements are complete")
+                if self._guided_reference["profile"] != self._vision_setup():
+                    raise RuntimeError("Camera/pose profile changed; start a new session")
+                self._prepare_guided_point()
+            elif action == "cancel":
+                self._guided_reference = None
                 self._reference.update(state="IDLE", hide_angle=False, message="Validation closed")
             elif action == "begin":
+                self._guided_reference = None
                 if self.recorder.status().active or self._calibration_locked():
                     raise RuntimeError("Finish the current recording/calibration first")
                 target = payload.get("target_deg")
-                if isinstance(target, bool) or target not in GONIOMETER_TARGETS:
-                    raise ValueError("Choose a target prompt: 90, 120, 150, or 175")
+                if isinstance(target, bool) or target not in (*GONIOMETER_TARGETS, 150):
+                    raise ValueError("Choose a target prompt: 90, 120, 140, 150, 160, or 175")
                 setup = str(payload.get("setup", "")).strip()
                 if not setup or len(setup) > 2000:
                     raise ValueError("Describe camera mounting/distance, floor mark, subject, and goniometer")
@@ -413,8 +471,10 @@ class VisionRuntime:
                 self._reference.update(state="CONFIRMED", hide_angle=False,
                                        message="Manual value confirmed; keep still and Capture a 3-second hold")
             elif action == "capture":
-                if self._reference["state"] != "CONFIRMED":
-                    raise RuntimeError("Confirm the measured goniometer value before Capture")
+                guided = self._guided_reference is not None
+                allowed = {"ENTRY", "CONFIRMED"} if guided else {"CONFIRMED"}
+                if self._reference["state"] not in allowed:
+                    raise RuntimeError("Prepare a guided point or confirm a measured value before Capture")
                 if self.recorder.status().active or self._calibration_locked():
                     raise RuntimeError("Finish the current recording/calibration first")
                 if self._reference_inputs["profile"] != self._vision_setup():
@@ -485,8 +545,35 @@ class VisionRuntime:
             with self._lock:
                 if report["status"] == "Measured":
                     self._reference_captures.append(report)
-                self._reference.update(state="MEASURED" if report["status"] == "Measured" else "RETRY",
-                                       result=report, message=report["hold"]["reason"] or "Measured; inspect signed errors and coverage")
+                guided = self._guided_reference
+                if guided is not None and inputs.get("session_id") == guided["id"] and report["status"] == "Measured":
+                    guided["captures"].append({
+                        "target_deg": inputs["target_deg"], "repeat_index": inputs["repeat_index"],
+                        "raw_mean_deg": report["metrics"]["raw"]["mean_deg"],
+                        "raw_error_deg": report["metrics"]["raw"]["bias_deg"],
+                        "filtered_mean_deg": report["metrics"]["filtered"]["mean_deg"],
+                        "filtered_error_deg": report["metrics"]["filtered"]["bias_deg"],
+                        "capture_id": inputs["capture_id"], "report_url": report["report_url"]})
+                    guided["index"] += 1
+                    if guided["index"] == len(guided["targets"]):
+                        import statistics
+                        errors = [c["raw_error_deg"] for c in guided["captures"]]
+                        summary = {"schema_version": 1, "session_id": guided["id"],
+                                   "camera_pose_profile": guided["profile"],
+                                   "protocol_targets_deg": list(GONIOMETER_TARGETS),
+                                   "independent_repositions_per_target": 2,
+                                   "captured_positions": list(guided["captures"]),
+                                   "raw_mae_deg": statistics.mean(abs(e) for e in errors),
+                                   "raw_rmse_deg": (statistics.mean(e*e for e in errors)) ** .5,
+                                   "method": "operator-positioned static goniometer references; no interpolation or correction",
+                                   "limitations": "2-D camera geometry and physical goniometer placement uncertainty"}
+                        name = "static_validation_session_" + guided["id"] + ".json"
+                        (self._reference_root / name).write_text(json.dumps(summary, indent=2), encoding="utf-8")
+                        guided["report_url"] = "/exports/recordings/goniometer/" + name
+                state = "COMPLETE" if guided and guided["index"] == len(guided["targets"]) else ("MEASURED" if report["status"] == "Measured" else "RETRY")
+                self._reference.update(state=state, hide_angle=False, result=report,
+                                       message=report["hold"]["reason"] or "Capture accepted; move away before next placement")
+                self._latest_jpeg = None
         except Exception as exc:
             with self._lock:
                 self._reference.update(state="RETRY", message=str(exc), result=None)
@@ -818,6 +905,8 @@ class VisionRuntime:
             if self._reference["hide_angle"]:
                 payload["raw_knee_angle_deg"] = None
                 payload["visual_knee_angle_deg"] = None
+        with self._lock:
+            payload["landmark_confidences"] = dict(self._landmark_scores)
         payload["goniometer"] = self.reference_status()
         recording_payload = asdict(self.recorder.status())
         recording_payload.update(self._recording_export_payload(recording_payload))
@@ -895,6 +984,19 @@ class VisionRuntime:
             "recommendation_display_path": recommendation_display,
             "recommendation_url": recommendation_url,
         }
+
+    def pose_tuning_history(self, seconds: float = 10.0) -> dict[str, Any]:
+        if not 0 < seconds <= 30:
+            raise ValueError("History window must be within 0..30 seconds")
+        cutoff = time.perf_counter_ns() - int(seconds * 1e9)
+        with self._lock:
+            rows = [dict(row) for row in self._pose_tuning_history
+                    if row["host_monotonic_ns"] >= cutoff]
+            if self._reference["hide_angle"]:
+                for row in rows:
+                    row["raw_angle_deg"] = None
+                    row["filtered_angle_deg"] = None
+            return {"rows": rows, "tuning": self._tuning.to_dict()}
 
     def tuning(self) -> dict[str, Any]:
         with self._lock:
@@ -1376,6 +1478,10 @@ class VisionRuntime:
                     ema_fps = 0.0
 
                 with self._lock:
+                    self._landmark_scores = {
+                        key: (getattr(raw_leg, key).confidence if raw_leg is not None else None)
+                        for key in ("hip", "knee", "ankle")
+                    }
                     # Raw observations detect real movement; display smoothing
                     # must not conceal off-frame points or transient dropouts.
                     previous_side = self._positioning.context[4] if self._positioning.context else None
@@ -1439,6 +1545,19 @@ class VisionRuntime:
                     "live_imu_knee_speed_deg_s": imu_estimate.knee_speed_deg_s,
                     "live_angle_difference_deg": difference_deg,
                 }
+                with self._lock:
+                    self._pose_tuning_history.append({
+                        "frame_index": frame_index,
+                        "host_monotonic_ns": host_monotonic_ns,
+                        "raw_angle_deg": raw_angle.angle_deg,
+                        "filtered_angle_deg": filtered_angle.angle_deg,
+                        "tracking_valid": filtered_angle.valid,
+                        "tracking_reason": filtered_angle.reason,
+                        "hip": self._landmark_scores["hip"],
+                        "knee": self._landmark_scores["knee"],
+                        "ankle": self._landmark_scores["ankle"],
+                        "tracked_leg": tracked_leg,
+                    })
                 with self._imu_filter_lock:
                     self._acquisition_history.append(
                         {

@@ -180,7 +180,7 @@ def test_page_uses_camera_first_two_pane_dashboard_with_breakpoints(tmp_path: Pa
     assert "grid-template-columns:minmax(0,58fr) minmax(380px,42fr)" in html
     assert "position:sticky" in html
     assert "object-fit:contain" in html
-    assert "max-height:88vh" in html
+    assert "max-height:82vh" in html
     assert "@media (max-width:1100px)" in html
     assert "@media (max-width:760px)" in html
 

@@ -118,8 +118,8 @@ def test_gui_controls_endpoints_and_entry_blindness_leave_underlying_samples_unc
     r = runtime(tmp_path)
     client = create_app(r).test_client()
     html = client.get("/").get_data(as_text=True)
-    assert "Check Tracking" in html and "Capture 3-second hold" in html
-    assert "2-D model cannot prove side-on orientation" in html
+    assert "Check Tracking" not in html and "Capture 3-second hold" in html
+    assert "10 measurements: 90°" in html and "referenceMeasured" not in html
     assert client.post("/api/positioning", json={"action": "show"}).status_code == 200
     assert client.post("/api/positioning", json={"action": "finish"}).status_code == 409
     assert client.post("/api/positioning", json=[1]).status_code == 400

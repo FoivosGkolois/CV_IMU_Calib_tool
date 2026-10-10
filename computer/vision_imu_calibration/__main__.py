@@ -77,6 +77,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--no-browser", action="store_true")
+    parser.add_argument("--pose-tuning-only", action="store_true",
+                        help="Open the standalone five-parameter pose tuning page")
     parser.add_argument(
         "--imu-transport",
         choices=("auto", "serial", "uno-q-bridge", "none"),
@@ -161,7 +163,7 @@ def main(argv: list[str] | None = None) -> int:
     runtime.start()
     app = create_app(runtime)
     url_host = "127.0.0.1" if args.host in {"0.0.0.0", "::"} else args.host
-    url = f"http://{url_host}:{args.port}"
+    url = f"http://{url_host}:{args.port}" + ("/pose-tuning" if args.pose_tuning_only else "")
     print(f"Vision–IMU calibration prototype: {url}")
     print(f"Pose backend: {estimator.description}")
     if imu_transport == "uno-q-bridge":

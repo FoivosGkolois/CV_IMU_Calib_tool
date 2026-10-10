@@ -25,14 +25,18 @@ _PAGE = r'''<!doctype html>
 html { min-width:320px; }
 body { margin:0; background:var(--bg); color:var(--text); overflow-x:hidden; }
 main { display:grid; grid-template-columns:minmax(0,58fr) minmax(380px,42fr); gap:14px; padding:12px; width:100%; margin:0; align-items:start; }
-.visual-column { position:sticky; top:12px; min-width:0; width:100%; max-height:calc(100vh - 24px); display:grid; gap:10px; overflow:auto; }
-.camera-column { min-width:0; width:100%; display:flex; justify-content:stretch; align-items:flex-start; }
-.video-shell { background:#05070b; border:1px solid var(--line); border-radius:14px; overflow:hidden; width:100%; min-width:0; max-height:88vh; aspect-ratio:16 / 9; align-self:start; display:flex; align-items:center; justify-content:center; }
+.visual-column { position:sticky; top:12px; min-width:0; width:100%; height:calc(100vh - 24px); display:grid; grid-template-rows:minmax(0,1fr); overflow:hidden; }
+.visual-top { min-width:0; min-height:0; display:grid; grid-template-columns:minmax(0,1fr) clamp(140px,18%,166px); gap:10px; overflow:hidden; }
+.camera-column { min-width:0; min-height:0; width:100%; height:100%; display:flex; justify-content:center; align-items:center; overflow:hidden; }
+.video-shell { background:transparent; border:1px solid var(--line); border-radius:14px; overflow:hidden; width:100%; height:100%; min-width:0; max-width:100%; max-height:100%; aspect-ratio:auto; flex:0 0 auto; display:flex; align-items:center; justify-content:center; }
 .video-shell img { width:100%; height:100%; object-fit:contain; display:block; }
-.live-summary { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:7px; align-items:stretch; }
+.live-summary { min-width:0; min-height:0; display:grid; grid-template-columns:minmax(0,1fr); grid-template-rows:repeat(4,auto); gap:7px; align-content:start; }
 .summary-card, .card, .chart-card { background:var(--surface); border:1px solid var(--line); border-radius:12px; }
-.summary-card { padding:9px 10px; min-width:0; max-width:100%; overflow:visible; }
+.summary-card { padding:8px 10px; min-width:0; min-height:0; max-width:100%; overflow:hidden; }
 .summary-card .value { font-size:clamp(14px,1.2vw,19px); }
+.landmark-line { display:grid; grid-template-columns:34px minmax(0,1fr) 30px; align-items:center; gap:4px; font-size:11px; padding:3px 0; }
+.landmark-line strong { font-size:11px; font-variant-numeric:tabular-nums; }
+.landmark-line progress { width:100%; height:7px; accent-color:#39a0ff; }
 .control-panel { min-width:0; display:grid; gap:10px; }
 .card { padding:12px; min-width:0; max-width:100%; overflow:visible; }
 .card.priority { border-color:#365374; box-shadow:0 0 0 1px rgba(57,160,255,.08); }
@@ -78,12 +82,13 @@ button:disabled { opacity:.45; cursor:not-allowed; }
 .metric { background:var(--surface-2); border:1px solid #2a3952; border-radius:9px; padding:8px; min-width:0; }
 .metric .name { color:var(--muted); font-size:9px; text-transform:uppercase; letter-spacing:.07em; }
 .metric .number { margin-top:4px; font-size:16px; font-weight:700; overflow-wrap:anywhere; }
-.chart-card { padding:0; min-width:0; max-width:100%; overflow:hidden; }
+.chart-card { padding:0; min-width:0; min-height:0; max-width:100%; height:auto; overflow:hidden; }
+.chart-card[open] { display:grid; grid-template-rows:auto minmax(0,1fr); }
 .chart-card > summary { padding:10px 12px; }
-.chart-content { height:clamp(210px,30vh,320px); padding:0 12px 12px; }
+.chart-content { min-height:0; height:210px; padding:0 12px 12px; display:grid; grid-template-rows:auto minmax(0,1fr); }
 .recommendation-card { padding:11px 12px; min-width:0; margin-top:10px; }
 .recommendation-values { margin-top:6px; color:#d8e3f4; font-size:13px; line-height:1.5; overflow-wrap:anywhere; }
-.chart-shell { height:calc(100% - 50px); min-height:140px; margin-top:8px; }
+.chart-shell { height:auto; min-height:120px; margin-top:8px; }
 .chart-shell canvas { width:100%; height:100%; display:block; background:#0a101a; border-radius:9px; }
 .calibration-card { border-color:#6f5b25; box-shadow:0 0 0 1px rgba(255,194,77,.10); }
 .calibration-actions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-top:9px; }
@@ -103,13 +108,19 @@ button:disabled { opacity:.45; cursor:not-allowed; }
 footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size:10px; }
 @media (max-width:1100px) {
   main { grid-template-columns:1fr; }
-  .visual-column { position:static; max-height:none; overflow:visible; }
+  .visual-column { position:static; height:auto; max-height:none; grid-template-rows:auto; overflow:visible; }
+  .visual-top { grid-template-columns:1fr; grid-template-rows:auto auto; overflow:visible; }
+  .camera-column { height:min(82vh,720px); }
   .video-shell { max-height:82vh; }
+  .live-summary { grid-template-columns:repeat(4,minmax(0,1fr)); grid-template-rows:auto; }
+  .summary-card { overflow:visible; }
+  .chart-card { height:auto; }
+  .chart-content { height:250px; }
 }
 @media (max-width:760px) {
   main { grid-template-columns:1fr; padding:10px; gap:10px; }
   .live-summary { grid-template-columns:repeat(2,minmax(0,1fr)); }
-  .chart-content { height:250px; }
+  .camera-column { height:min(78vh,600px); }
   .button-grid { grid-template-columns:1fr 1fr; }
   .results-links { grid-template-columns:1fr; }
 }
@@ -123,24 +134,30 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
 <body>
 <main>
 <section class="visual-column" aria-label="Live camera and essential status">
-  <div class="camera-column">
-    <div id="videoShell" class="video-shell"><img id="videoStream" src="/video.mjpg" alt="Live camera stream"></div>
+  <div class="visual-top">
+    <div class="camera-column">
+      <div id="videoShell" class="video-shell"><img id="videoStream" src="/video.mjpg" alt="Live camera stream"></div>
+    </div>
+    <div class="live-summary">
+      <div class="summary-card"><div class="label">Tracking</div><div id="tracking" class="value">Starting…</div><div id="reason" class="small">Initializing camera and pose model</div></div>
+      <div class="summary-card"><div class="label">Visual angle</div><div id="angle" class="value">--.-°</div><div id="rawAngle" class="small">Raw: --.-°</div></div>
+      <div class="summary-card"><div class="label">IMU angle</div><div id="imuAngle" class="value">--.-°</div><div id="imuEstimatorState" class="small">NO SAMPLE</div></div>
+      <div class="summary-card"><div class="label">Landmark confidence</div>
+        <div class="landmark-line"><span>Hip</span><progress id="hipConfidenceBar" max="1" value="0"></progress><strong id="hipConfidence">—</strong></div>
+        <div class="landmark-line"><span>Knee</span><progress id="kneeConfidenceBar" max="1" value="0"></progress><strong id="kneeConfidence">—</strong></div>
+        <div class="landmark-line"><span>Ankle</span><progress id="ankleConfidenceBar" max="1" value="0"></progress><strong id="ankleConfidence">—</strong></div>
+        <div id="fps" class="small">0.0 FPS</div></div>
+    </div>
   </div>
-  <div class="live-summary">
-    <div class="summary-card"><div class="label">Tracking</div><div id="tracking" class="value">Starting…</div><div id="reason" class="small">Initializing camera and pose model</div></div>
-    <div class="summary-card"><div class="label">Visual angle</div><div id="angle" class="value">--.-°</div><div id="rawAngle" class="small">Raw: --.-°</div></div>
-    <div class="summary-card"><div class="label">IMU angle</div><div id="imuAngle" class="value">--.-°</div><div id="imuEstimatorState" class="small">NO SAMPLE</div></div>
-    <div class="summary-card"><div class="label">Pose quality</div><div id="confidence" class="value">0.00</div><div id="fps" class="small">0.0 FPS</div></div>
-  </div>
-  <details class="chart-card">
+</section>
+<aside class="control-panel">
+  <details id="liveChartPanel" class="chart-card">
     <summary><span class="label">Live angle chart · last 15 s</span></summary>
     <div class="chart-content">
       <div class="note">Blue: visual reference · Green: IMU estimate. Calibration scoring runs offline.</div>
       <div class="chart-shell"><canvas id="angleChart"></canvas></div>
     </div>
   </details>
-</section>
-<aside class="control-panel">
   <div class="card readiness-strip"><span class="label">IMU readiness</span><span id="imuReadySummary" class="value small">NOT READY</span></div>
 
   <details id="cameraSetupStep" class="card workflow-step" data-workflow-step data-focus-panel open>
@@ -154,42 +171,28 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
     </div>
   </details>
 
-  <details id="positionStep" class="card workflow-step" data-workflow-step data-focus-panel>
-    <summary><span class="step-heading"><span class="step-number">2</span><span class="step-title">Check Tracking</span></span><span id="positionStepStatus" class="step-status">IDLE</span></summary>
-    <div class="step-content">
-      <div class="note">Stand side-on and keep the full hip–knee–ankle chain inside the frame. The 2-D model cannot prove side-on orientation.</div>
-      <button id="checkTracking" class="primary" onclick="positionAction('check')">Check Tracking</button>
-      <div class="note">After clicking, slowly bend and straighten the knee. The check uses several seconds of fresh frames and never passes a single static frame.</div>
-      <div id="positionResult" class="note">Ready to check tracking</div>
-    </div>
-  </details>
-
   <details id="referencePanel" class="card auxiliary-panel" data-focus-panel>
     <summary><span class="step-heading"><span class="step-title">Goniometer / Static Vision Check</span></span><span id="referenceStepStatus" class="step-status">OPTIONAL</span></summary>
-    <div class="step-content controls">
-      <div class="note">Use this partial static validation at several angles when available. Enter the measured posterior angle before the AI value is revealed.</div>
-      <div class="note">Goniometer placement and reading have measurement uncertainty. Results report static agreement/error only; they do not establish perfect dynamic ground truth, auto-correct pose, or tune Bayesian/vision settings.</div>
-      <label class="small" for="referenceSetup">Setup: subject ID, camera mounting/distance, floor mark/chair and goniometer</label>
-      <textarea id="referenceSetup" rows="3" maxlength="2000"></textarea>
-      <label class="small" for="referenceTarget">Target prompt</label>
-      <select id="referenceTarget"><option value="90">~90 degrees</option><option value="120">~120 degrees</option><option value="150">~150 degrees</option><option value="175">Near straight (~175 degrees)</option></select>
-      <button id="referenceBegin" onclick="referenceAction('begin')">New / repeat point (hide AI value)</button>
-      <label class="small" for="referenceMeasured">Actual measured goniometer angle (0..180; 180 = straight)</label>
-      <input id="referenceMeasured" type="number" min="0" max="180" step="any" disabled>
-      <div class="button-grid"><button id="referenceConfirm" onclick="referenceAction('confirm')" disabled>Confirm manual value</button><button id="referenceCapture" onclick="referenceAction('capture')" disabled>Capture 3-second hold</button></div>
-      <button id="referenceClose" class="secondary" onclick="referenceAction('cancel')">Close validation</button>
-      <div id="referenceState" class="note">Optional laboratory validation</div>
+    <div class="step-content" style="display:grid;gap:10px">
+      <div class="note">10 measurements: 90°, 120°, 140°, 160°, 175° · 2 independent placements each. The numerical AI angle stays hidden until the hold ends.</div>
+      <div class="metric" id="referenceProgressCard">
+        <div class="name">STATIC VALIDATION PROGRESS</div>
+        <div class="number" id="referenceProgress">Not started</div>
+        <div class="progress-track"><div class="progress-fill" id="referenceProgressBar"></div></div>
+      </div>
+      <div id="referenceInstruction" class="small">Use the physical goniometer to set the requested angle. No manual entry is needed.</div>
+      <button id="referenceBegin" class="primary" onclick="referenceAction('start_session')">Start 10-position static check</button>
+      <button id="referenceCapture" class="primary" onclick="referenceAction('capture')" hidden>Capture 3-second hold</button>
+      <button id="referenceNext" class="secondary" onclick="referenceAction('next')" hidden>Move away, reposition and continue</button>
+      <button id="referenceClose" class="secondary" onclick="referenceAction('cancel')" hidden>End this session</button>
+      <div id="referenceState" class="note">Optional static comparison; no pose correction is applied.</div>
       <div id="referenceResults" class="small" style="white-space:pre-wrap"></div>
-      <label class="small" for="savedReference">Saved accepted capture (reusable across equivalent sessions)</label>
-      <select id="savedReference"></select>
-      <div id="savedSetup" class="note"></div>
-      <label class="small"><input id="unchangedSetup" type="checkbox"> I confirm unchanged physical camera/subject setup and positioning.</label>
-      <button id="referenceReuse" onclick="referenceAction('reuse')">Use saved comparison</button>
+      <div class="note">Goniometer placement and 2-D camera geometry introduce uncertainty. This check does not establish dynamic accuracy.</div>
     </div>
   </details>
 
   <details id="calibrationStep" class="card workflow-step calibration-card" data-workflow-step data-focus-panel>
-    <summary><span class="step-heading"><span class="step-number">3</span><span class="step-title">IMU Calibration + Bayesian</span></span><span id="calibrationStepStatus" class="step-status">IDLE</span></summary>
+    <summary><span class="step-heading"><span class="step-number">2</span><span class="step-title">IMU Calibration + Bayesian</span></span><span id="calibrationStepStatus" class="step-status">IDLE</span></summary>
     <div class="step-content">
       <div id="calibrationState" class="value small">READY</div>
       <div id="calibrationMessage" class="note">Start calibration with the static stage, then continue to the dynamic stage.</div>
@@ -204,7 +207,7 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
   </details>
 
   <details id="validationStep" class="card workflow-step" data-workflow-step data-focus-panel>
-    <summary><span class="step-heading"><span class="step-number">4</span><span class="step-title">Independent Validation</span></span><span id="validationStepStatus" class="step-status">IDLE</span></summary>
+    <summary><span class="step-heading"><span class="step-number">3</span><span class="step-title">Independent Validation</span></span><span id="validationStepStatus" class="step-status">IDLE</span></summary>
     <div class="step-content">
       <div id="recording" class="value small">IDLE</div>
       <div class="note">After Bayesian calibration, record a NEW synchronized camera+IMU flexion–extension trial with the unchanged physical setup.</div>
@@ -216,7 +219,7 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
   </details>
 
   <details id="resultsStep" class="card workflow-step" data-workflow-step data-focus-panel>
-    <summary><span class="step-heading"><span class="step-number">5</span><span class="step-title">Results &amp; Exports</span></span><span id="resultsStepStatus" class="step-status">IDLE</span></summary>
+    <summary><span class="step-heading"><span class="step-number">4</span><span class="step-title">Results &amp; Exports</span></span><span id="resultsStepStatus" class="step-status">IDLE</span></summary>
     <div class="step-content">
       <div class="recommendation-card card"><div class="label">Recommended IMU filter settings</div><div id="imuRecommendationState" class="note">Complete both stages of one calibration run to generate data-driven settings.</div><div id="imuRecommendationValues" class="recommendation-values"></div></div>
       <div class="results-links"><a id="referenceExport" class="path-link" href="/exports/recordings/" target="_blank" rel="noopener">Open goniometer validation exports</a><a id="recordingPath" class="path-link" href="/exports/recordings/" target="_blank" rel="noopener">Open recording exports</a><a id="calibrationPath" class="path-link" href="/exports/calibration/" target="_blank" rel="noopener">Open calibration exports</a><a id="heldoutPath" class="path-link" href="/exports/calibration/" target="_blank" rel="noopener">Held-out result will be saved with this calibration run.</a></div>
@@ -226,7 +229,7 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
   <details class="card" data-focus-panel>
     <summary><span class="label">Advanced / Diagnostics</span></summary>
     <div class="step-content">
-      <div class="label">Pose settings</div>
+      <div class="label">Pose settings</div><a class="path-link" href="/pose-tuning" target="_blank" rel="noopener">Open standalone UNO Q Pose Tuning Laboratory</a>
       <div class="note">Factory defaults remain unchanged. Session changes invalidate stale calibration reuse.</div>
       <div class="controls">
         <div class="control-row"><div class="control-head"><span>Acceptance confidence</span><span id="confidenceThresholdValue">0.30</span></div><input id="confidenceThreshold" type="range" min="0.05" max="0.99" step="0.01"></div>
@@ -268,16 +271,13 @@ const savePosePresetButton=document.getElementById('savePosePreset');
 const posePresetMessage=document.getElementById('posePresetMessage');
 const imuReadySummary=document.getElementById('imuReadySummary');
 const cameraSetupStepStatus=document.getElementById('cameraSetupStepStatus');
-const positionStepStatus=document.getElementById('positionStepStatus');
 const referenceStepStatus=document.getElementById('referenceStepStatus');
 const calibrationStepStatus=document.getElementById('calibrationStepStatus');
 const validationStepStatus=document.getElementById('validationStepStatus');
 const resultsStepStatus=document.getElementById('resultsStepStatus');
-const checkTrackingButton=document.getElementById('checkTracking');
 const reason=document.getElementById('reason');
 const angle=document.getElementById('angle');
 const rawAngle=document.getElementById('rawAngle');
-const confidence=document.getElementById('confidence');
 const fps=document.getElementById('fps');
 const source=document.getElementById('source');
 const backend=document.getElementById('backend');
@@ -333,19 +333,31 @@ const imuRecommendationState=document.getElementById('imuRecommendationState');
 const imuRecommendationValues=document.getElementById('imuRecommendationValues');
 const reloadImuFilter=document.getElementById('reloadImuFilter');
 const angleChart=document.getElementById('angleChart');
+const liveChartPanel=document.getElementById('liveChartPanel');
+const cameraColumn=document.querySelector('.camera-column');
 const videoShell=document.getElementById('videoShell');
 const videoStream=document.getElementById('videoStream');
 function resizeVideoShell(){
   const naturalWidth=Number(videoStream.naturalWidth||0);
   const naturalHeight=Number(videoStream.naturalHeight||0);
   if(!naturalWidth||!naturalHeight) return;
+  const bounds=cameraColumn.getBoundingClientRect();
+  if(!bounds.width||!bounds.height) return;
+  const ratio=naturalWidth/naturalHeight;
+  let width=bounds.width;
+  let height=width/ratio;
+  if(height>bounds.height){ height=bounds.height; width=height*ratio; }
+  videoShell.style.width=Math.max(1,Math.floor(width))+'px';
+  videoShell.style.height=Math.max(1,Math.floor(height))+'px';
   videoShell.style.aspectRatio=String(naturalWidth/naturalHeight);
   drawAngleChart(window.latestAngleRows||[]);
 }
 videoStream.addEventListener('load',resizeVideoShell);
+liveChartPanel.addEventListener('toggle',()=>{ if(liveChartPanel.open) drawAngleChart(window.latestAngleRows||[]); });
 window.addEventListener('resize',()=>{ resizeVideoShell(); drawAngleChart(window.latestAngleRows||[]); },{passive:true});
 if('ResizeObserver' in window){
-  const observer=new ResizeObserver(()=>drawAngleChart(window.latestAngleRows||[]));
+  const observer=new ResizeObserver(()=>{ resizeVideoShell(); drawAngleChart(window.latestAngleRows||[]); });
+  observer.observe(cameraColumn);
   observer.observe(angleChart.parentElement);
 }
 let accordionSync=false;
@@ -560,63 +572,64 @@ function drawAngleChart(rows){
 }
 async function refreshHistory(){ try{ const r=await fetch('/api/acquisition/history?seconds=15&max_points=300',{cache:'no-store'}); const body=await r.json(); if(r.ok){ window.latestAngleRows=window.referenceBlinded?[]:(body.rows||[]); drawAngleChart(window.latestAngleRows); } }catch(e){} }
 let referenceRequestPending=false;
-let savedCaptures=[];
 function setReferenceBlind(blind){
   window.referenceBlinded=blind;
-  if(blind){ angle.textContent='Hidden until manual confirmation'; rawAngle.textContent=''; angleDifference.textContent='--.-°'; window.latestAngleRows=[]; drawAngleChart([]); }
-}
-async function positionAction(action){
-  const out=document.getElementById('positionResult');
-  try{ const r=await fetch('/api/positioning',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action})});
-    const b=await r.json(); out.textContent=r.ok?b.reason:b.error;
-  }catch(e){ out.textContent=String(e); }
+  if(blind){ angle.textContent='Hidden until capture finishes'; rawAngle.textContent='Raw: hidden';
+    angleDifference.textContent='--.-°'; window.latestAngleRows=[]; drawAngleChart([]); }
 }
 async function referenceAction(action){
   if(referenceRequestPending) return;
   referenceRequestPending=true;
-  if(action==='begin'){ setReferenceBlind(true); videoStream.removeAttribute('src'); document.getElementById('referenceMeasured').value=''; }
-  const payload={action,target_deg:Number(document.getElementById('referenceTarget').value),
-    setup:document.getElementById('referenceSetup').value,
-    reference_angle_deg:document.getElementById('referenceMeasured').value,
-    capture_id:document.getElementById('savedReference').value,
-    unchanged_setup:document.getElementById('unchangedSetup').checked};
-  try{
-    const r=await fetch('/api/goniometer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-    const b=await r.json();
-    if(r.ok){ setReferenceBlind(Boolean(b.hide_angle)); updateReference(b); }
-    else{ document.getElementById('referenceState').textContent=b.error; }
-  }catch(e){ document.getElementById('referenceState').textContent=String(e); }
-  finally{ referenceRequestPending=false; if(action==='begin') videoStream.src='/video.mjpg?entry='+Date.now(); }
-}
-function updateSavedSetup(){
-  const row=savedCaptures.find(r=>r.capture_id===document.getElementById('savedReference').value);
-  document.getElementById('savedSetup').textContent=row?('Saved setup: '+row.setup):'No accepted capture selected';
-  document.getElementById('unchangedSetup').checked=false;
-}
-document.getElementById('savedReference').addEventListener('change',updateSavedSetup);
-function updateReference(g){
-  const busy=['CAPTURING','FINALIZING'].includes(g.state);
-  document.getElementById('referenceState').textContent=(g.state||'IDLE')+' · '+(g.message||'');
-  referenceStepStatus.textContent=String(g.state||'IDLE').replaceAll('_',' ');
-  referenceStepStatus.className='step-status '+(g.state==='PASSED'?'ok':(g.state==='FAILED'||g.state==='INVALID'?'bad':''));
-  document.getElementById('referenceMeasured').disabled=g.state!=='ENTRY';
-  document.getElementById('referenceConfirm').disabled=g.state!=='ENTRY'||referenceRequestPending;
-  document.getElementById('referenceCapture').disabled=g.state!=='CONFIRMED'||referenceRequestPending;
-  for(const id of ['referenceBegin','referenceClose','referenceReuse','referenceTarget','referenceSetup']) document.getElementById(id).disabled=busy;
-  const captures=g.captures||[]; const select=document.getElementById('savedReference');
-  if(captures.map(r=>r.capture_id).join()!==savedCaptures.map(r=>r.capture_id).join()){
-    const selected=select.value; select.replaceChildren(); savedCaptures=captures;
-    for(const row of captures){ const o=document.createElement('option'); o.value=row.capture_id; o.textContent='~'+row.target_deg+' / measured '+row.reference_angle_deg+' deg · '+row.capture_id.slice(0,8); select.appendChild(o); }
-    if(captures.some(r=>r.capture_id===selected)) select.value=selected;
-    updateSavedSetup();
+  if(action==='start_session'||action==='next'){
+    setReferenceBlind(true);
+    videoStream.removeAttribute('src');
   }
-  const r=g.result; const lines=[];
-  if(r){ lines.push(r.status+' · measured '+r.reference_angle_deg+' deg (prompt '+r.target_deg+')');
-    for(const k of ['raw','filtered']){ const a=r.metrics[k]; if(a) lines.push(k+': mean '+a.mean_deg.toFixed(2)+' deg / signed error '+a.bias_deg.toFixed(2)+' deg'); }
-    lines.push('Coverage: '+r.hold.frames_valid+'/'+r.hold.frames_total+' · '+(100*r.hold.coverage).toFixed(1)+'%');
-    document.getElementById('referenceExport').href=r.report_url||'/exports/recordings/'; }
-  for(const p of g.repeatability||[]){ if(p.accepted_captures) lines.push('Prompt '+p.target_deg+': '+p.accepted_captures+' accepted · raw/filtered mean SD '+(p.raw.mean_sd_deg==null?'repeat needed':p.raw.mean_sd_deg.toFixed(2)+' / '+p.filtered.mean_sd_deg.toFixed(2)+' deg')); }
-  if((g.load_errors||[]).length) lines.push('Saved report load errors: '+g.load_errors.join('; '));
+  try{
+    const response=await fetch('/api/goniometer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action})});
+    const data=await response.json();
+    if(!response.ok){ document.getElementById('referenceState').textContent=data.error||'Capture error';
+      // The server owns blind state; restore it on the next status refresh.
+    }else{ setReferenceBlind(Boolean(data.hide_angle)); updateReference(data); }
+  }catch(error){ document.getElementById('referenceState').textContent=String(error); }
+  finally{
+    referenceRequestPending=false;
+    if(action==='start_session'||action==='next') videoStream.src='/video.mjpg?guided='+Date.now();
+  }
+}
+function updateReference(g){
+  const guide=g.guided;
+  const busy=['CAPTURING','FINALIZING'].includes(g.state);
+  const ready=Boolean(guide)&&g.state==='ENTRY';
+  const captured=Boolean(guide)&&['MEASURED','RETRY'].includes(g.state);
+  const complete=Boolean(guide)&&guide.complete;
+  const startButton=document.getElementById('referenceBegin');
+  const captureButton=document.getElementById('referenceCapture');
+  const nextButton=document.getElementById('referenceNext');
+  const closeButton=document.getElementById('referenceClose');
+  startButton.hidden=Boolean(guide); startButton.disabled=referenceRequestPending||busy;
+  captureButton.hidden=!ready; captureButton.disabled=referenceRequestPending||!window.latestTrackingValid;
+  nextButton.hidden=!captured||complete; nextButton.disabled=referenceRequestPending||busy;
+  nextButton.textContent=g.state==='RETRY'?'Retry same position':'Move away, reposition and continue';
+  closeButton.hidden=!guide; closeButton.disabled=busy||referenceRequestPending;
+  referenceStepStatus.textContent=complete?'COMPLETE':(guide?`${guide.index}/${guide.total}`:'OPTIONAL');
+  referenceStepStatus.className='step-status '+(complete?'ok':(g.state==='RETRY'?'bad':''));
+  const progress=document.getElementById('referenceProgress');
+  document.getElementById('referenceProgressBar').style.width=(guide?100*guide.index/guide.total:0)+'%';
+  progress.textContent=guide?`${guide.index} / ${guide.total} accepted captures`:'Not started';
+  document.getElementById('referenceInstruction').textContent=complete?'All 10 positions collected. Inspect results below.':
+    guide?`Position ${guide.index+1} / 10 · ${guide.target_deg}° · repetition ${guide.repeat}/2. Use the physical goniometer to set ${guide.target_deg}°, then hold still for 3 seconds. After Capture, move away before the next repetition.`:
+    'Use the physical goniometer to set the requested angle. No manual entry is needed.';
+  document.getElementById('referenceState').textContent=(g.state||'IDLE')+' · '+(g.message||'');
+  const lines=[];
+  for(const row of guide?.captures||[]){
+    lines.push(`${row.target_deg}° #${row.repeat_index}: MoveNet raw ${Number(row.raw_mean_deg).toFixed(1)}° · error ${Number(row.raw_error_deg)>=0?'+':''}${Number(row.raw_error_deg).toFixed(1)}°`);
+  }
+  if(g.state==='RETRY') lines.push('Capture was not accepted; reposition and retry.');
+  if(complete&&guide.report_url){
+    const mae=(guide.captures||[]).reduce((sum,r)=>sum+Math.abs(r.raw_error_deg),0)/guide.captures.length;
+    lines.push(`10-position raw MAE: ${mae.toFixed(2)}°`);
+    document.getElementById('referenceExport').href=guide.report_url;
+  }else if(g.result?.report_url){ document.getElementById('referenceExport').href=g.result.report_url; }
   document.getElementById('referenceResults').textContent=lines.join('\n');
 }
 function updateImuRecommendations(cal){
@@ -655,17 +668,21 @@ async function refresh(){
     const g=s.goniometer||{};
     if(!referenceRequestPending) setReferenceBlind(Boolean(g.hide_angle));
     updateReference(g);
-    const pos=s.positioning||{};
-    document.getElementById('positionResult').textContent=(pos.reason||'Ready to check tracking')+(pos.warning?' · WARNING: '+pos.warning:'');
-    positionStepStatus.textContent=String(pos.state||'IDLE').replaceAll('_',' ');
-    positionStepStatus.className='step-status '+(pos.state==='PASSED'?'ok':(pos.state==='FAILED'||pos.state==='RETRY'?'bad':''));
     const t=document.getElementById('tracking');
     t.textContent=s.tracking_valid?'VALID':'INVALID'; t.className='value '+(s.tracking_valid?'ok':'bad');
     reason.textContent=s.tracking_reason||'—';
     angle.textContent=s.visual_knee_angle_deg==null?'--.-°':Number(s.visual_knee_angle_deg).toFixed(1)+'°';
     rawAngle.textContent=s.raw_knee_angle_deg==null?'Raw: --.-°':'Raw: '+Number(s.raw_knee_angle_deg).toFixed(1)+'°';
     if(window.referenceBlinded) setReferenceBlind(true);
-    confidence.textContent=Number(s.pose_confidence).toFixed(2);
+    const landmarkConfidences=s.landmark_confidences||{};
+    for(const key of ['hip','knee','ankle']){
+      const score=landmarkConfidences[key];
+      const valid=score!==null&&score!==undefined&&Number.isFinite(Number(score));
+      const value=valid?Number(score):0;
+      document.getElementById(key+'Confidence').textContent=valid?value.toFixed(2):'—';
+      document.getElementById(key+'ConfidenceBar').value=value;
+    }
+    window.latestTrackingValid=Boolean(s.tracking_valid);
     fps.textContent=Number(s.inference_fps).toFixed(1)+' FPS';
     source.textContent='Source: '+(s.source||'—');
     backend.textContent='Backend: '+(s.pose_backend||'—');
@@ -718,7 +735,6 @@ async function refresh(){
     updateImuRecommendations(cal);
     const calibrationBusy=referenceBusy||Boolean(cal.active)||String(cal.state||'').startsWith('ANALYZING');
     const sourceReady=Boolean(imu.connected)&&Boolean(imu.thigh_ready&&imu.shank_ready)&&Boolean(s.tracking_valid);
-    checkTrackingButton.disabled=pos.state==='CHECKING'||Boolean((s.recording||{}).active)||calibrationBusy||s.state!=='RUNNING';
     startStaticTest.disabled=calibrationBusy||Boolean((s.recording||{}).active)||!sourceReady||cal.state==='AWAITING_DYNAMIC';
     startStaticTest.textContent=(cal.state==='COMPLETE'||cal.state==='FAILED')?'Start new calibration':'Start calibration';
     startDynamicTest.disabled=calibrationBusy||Boolean((s.recording||{}).active)||!sourceReady||!Boolean(cal.static_suggestion&&Object.keys(cal.static_suggestion).length)||!['AWAITING_DYNAMIC','INVALID'].includes(cal.state);
@@ -795,6 +811,18 @@ def create_app(runtime: VisionRuntime) -> Any:
     @app.get("/")
     def index() -> str:
         return _PAGE
+
+    @app.get("/pose-tuning")
+    def standalone_pose_tuning() -> str:
+        from .pose_tuning_page import TUNING_PAGE
+        return TUNING_PAGE
+
+    @app.get("/api/pose-tuning/history")
+    def pose_tuning_history() -> Any:
+        try:
+            return jsonify(runtime.pose_tuning_history(float(request.args.get("seconds", "10"))))
+        except (ValueError, TypeError) as exc:
+            return jsonify({"error": str(exc)}), 400
 
     @app.get("/api/status")
     def status() -> Any:

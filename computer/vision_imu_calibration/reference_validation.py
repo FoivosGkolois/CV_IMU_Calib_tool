@@ -24,7 +24,7 @@ from zipfile import BadZipFile, ZipFile
 
 REQUIRED_COLUMNS = ("trial_id", "reference_angle_deg", "recording_zip")
 ANGLE_COLUMNS = ("raw_knee_angle_deg", "visual_knee_angle_deg")
-GONIOMETER_TARGETS = (90, 120, 150, 175)
+GONIOMETER_TARGETS = (90, 120, 140, 160, 175)
 
 
 def measured_reference(value: object) -> float:
