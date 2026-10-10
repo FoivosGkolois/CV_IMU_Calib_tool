@@ -66,8 +66,8 @@ def test_gui_has_no_legacy_tracking_gate_or_manual_goniometer_forms():
     assert "referenceAction('start_session')" in _PAGE
     assert "referenceAction('next')" in _PAGE
     assert "referenceAction('capture')" in _PAGE
-    for target in GONIOMETER_TARGETS:
-        assert str(target) in _PAGE
+    assert GONIOMETER_TARGETS == (90, 120, 140, 160, 175)
+    assert "target+'°'" in _PAGE  # The angle is shown dynamically, not as static help text.
     for landmark in ('hip', 'knee', 'ankle'):
         assert f'id="{landmark}Confidence"' in _PAGE
     assert 'id="confidence"' not in _PAGE
@@ -99,3 +99,29 @@ def test_tuning_history_keeps_native_observation_and_leg_scores(tmp_path):
         r.pose_tuning_history(seconds=40)
     r._reference["hide_angle"] = True
     assert r.pose_tuning_history(seconds=10)["rows"][0]["raw_angle_deg"] is None
+
+
+def test_overlay_stroke_is_session_only_and_strictly_validated(tmp_path):
+    r = make_runtime(tmp_path)
+    assert r._overlay_stroke_scale == 1.0
+    assert r.set_overlay_stroke_scale(0.4) == {"stroke_scale": 0.4}
+    assert r._overlay_stroke_scale == 0.4
+    assert r.overlay_stroke_status() == {"stroke_scale": 0.4}
+    for rejected in (0, 1.3, float("nan"), float("inf"), True, "unknown", None):
+        with pytest.raises(ValueError):
+            r.set_overlay_stroke_scale(rejected)
+    # Pose tuning and calibration profile are untouched by this presentation-only setting.
+    assert r._tuning.confidence_threshold == 0.30
+    assert "stroke_scale" not in r._vision_setup()["tuning"]
+
+
+def test_goniometer_prominent_capture_display_and_no_redundant_help():
+    for part in ('id="referencePosition"', 'id="referenceRepeat"', 'id="referenceTarget"',
+                 'id="referenceInstruction"', 'id="referenceProgressBar"',
+                 'id="referenceResultsPanel"'):
+        assert part in _PAGE
+    assert 'Goniometer placement and 2-D camera geometry introduce uncertainty' not in _PAGE
+    assert 'Position ${guide.index+1} / 10' not in _PAGE
+    assert 'id="overlayStroke"' in _PAGE
+    assert 'id="overlayStrokeValue"' in _PAGE
+    assert "fetch('/api/overlay/stroke'" in _PAGE

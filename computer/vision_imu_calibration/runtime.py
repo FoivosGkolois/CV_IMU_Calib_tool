@@ -175,6 +175,7 @@ class VisionRuntime:
         self._imu_thread: threading.Thread | None = None
         self._latest_jpeg: bytes | None = None
         self._frame_sequence = 0
+        self._overlay_stroke_scale = 1.0  # Session-only visual preference; never affects pose data.
         self._pose_error = ""
         self._reset_tracking_event = threading.Event()
         self._camera_profile = self._infer_camera_profile()
@@ -409,6 +410,24 @@ class VisionRuntime:
                                reused_capture_id="",
                                message=f"Position leg at {target}° using the physical goniometer, then Capture")
         self._latest_jpeg = None
+
+    def overlay_stroke_status(self) -> dict[str, float]:
+        with self._lock:
+            return {"stroke_scale": self._overlay_stroke_scale}
+
+    def set_overlay_stroke_scale(self, value: float) -> dict[str, float]:
+        """Change only live overlay stroke width; keep pose geometry and markers unchanged."""
+        if isinstance(value, bool):
+            raise ValueError("Overlay stroke scale must be numeric")
+        try:
+            scale = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Overlay stroke scale must be numeric") from exc
+        if not math.isfinite(scale) or not 0.4 <= scale <= 1.2:
+            raise ValueError("Overlay stroke scale must be between 0.4 and 1.2")
+        with self._lock:
+            self._overlay_stroke_scale = scale
+        return {"stroke_scale": scale}
 
     def reference_status(self) -> dict[str, Any]:
         with self._lock:
@@ -1499,6 +1518,7 @@ class VisionRuntime:
                                               positioning_angle, tuning.confidence_threshold)
                     position_status = self._positioning.snapshot()
                     hide_angle = self._reference["hide_angle"]
+                    stroke_scale = self._overlay_stroke_scale
                 annotated = draw_leg_overlay(
                     frame,
                     leg,
@@ -1508,6 +1528,7 @@ class VisionRuntime:
                     recording_active=self.recorder.status().active,
                     hide_angle=hide_angle,
                     positioning=position_status,
+                    stroke_scale=stroke_scale,
                 )
                 ok, encoded = cv2.imencode(".jpg", annotated, [int(cv2.IMWRITE_JPEG_QUALITY), 86])
                 if not ok:

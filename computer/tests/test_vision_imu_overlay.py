@@ -68,3 +68,41 @@ def test_valid_and_invalid_tracking_badges_are_visually_distinct() -> None:
     invalid_output = draw_leg_overlay(frame, None, invalid, inference_fps=0.0, source_description="")
 
     assert not np.array_equal(valid_output, invalid_output)
+
+
+def test_overlay_stroke_slider_changes_bars_and_arc_but_not_joint_radius(monkeypatch) -> None:
+    import cv2
+    frame = np.zeros((360, 480, 3), dtype=np.uint8)
+    angle = KneeAngleResult(angle_deg=120.0, valid=True, confidence=0.9, reason="ok")
+    line_widths = []
+    arc_widths = []
+    marker_radii = []
+    line_fn, poly_fn, circle_fn = cv2.line, cv2.polylines, cv2.circle
+
+    def track_line(image, start, end, color, thickness=1, *args, **kwargs):
+        line_widths.append(thickness)
+        return line_fn(image, start, end, color, thickness, *args, **kwargs)
+
+    def track_poly(image, pts, closed, color, thickness=1, *args, **kwargs):
+        arc_widths.append(thickness)
+        return poly_fn(image, pts, closed, color, thickness, *args, **kwargs)
+
+    def track_circle(image, center, radius, color, thickness=1, *args, **kwargs):
+        marker_radii.append(radius)
+        return circle_fn(image, center, radius, color, thickness, *args, **kwargs)
+
+    monkeypatch.setattr(cv2, "line", track_line)
+    monkeypatch.setattr(cv2, "polylines", track_poly)
+    monkeypatch.setattr(cv2, "circle", track_circle)
+    measurements = []
+    for scale in (1.0, 0.4, 1.2):
+        line_widths.clear(); arc_widths.clear(); marker_radii.clear()
+        draw_leg_overlay(frame, _leg(), angle, inference_fps=6.0,
+                         source_description="test", stroke_scale=scale)
+        measurements.append((tuple(line_widths), tuple(arc_widths), tuple(marker_radii)))
+    default, slim, wide = measurements
+    assert len(default[0]) == len(slim[0]) == len(wide[0]) == 2
+    assert default[0][0] > slim[0][0] and wide[0][0] > default[0][0]
+    assert slim[1][0] < default[1][0] < wide[1][0]
+    assert len(default[2]) == 6
+    assert default[2] == slim[2] == wide[2]

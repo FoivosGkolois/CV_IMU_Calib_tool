@@ -26,17 +26,36 @@ html { min-width:320px; }
 body { margin:0; background:var(--bg); color:var(--text); overflow-x:hidden; }
 main { display:grid; grid-template-columns:minmax(0,58fr) minmax(380px,42fr); gap:14px; padding:12px; width:100%; margin:0; align-items:start; }
 .visual-column { position:sticky; top:12px; min-width:0; width:100%; height:calc(100vh - 24px); display:grid; grid-template-rows:minmax(0,1fr); overflow:hidden; }
-.visual-top { min-width:0; min-height:0; display:grid; grid-template-columns:minmax(0,1fr) clamp(140px,18%,166px); gap:10px; overflow:hidden; }
+.visual-top { min-width:0; min-height:0; display:grid; grid-template-columns:minmax(0,1fr) clamp(180px,27%,280px); gap:clamp(10px,.8vw,16px); overflow:hidden; }
 .camera-column { min-width:0; min-height:0; width:100%; height:100%; display:flex; justify-content:center; align-items:center; overflow:hidden; }
 .video-shell { background:transparent; border:1px solid var(--line); border-radius:14px; overflow:hidden; width:100%; height:100%; min-width:0; max-width:100%; max-height:100%; aspect-ratio:auto; flex:0 0 auto; display:flex; align-items:center; justify-content:center; }
 .video-shell img { width:100%; height:100%; object-fit:contain; display:block; }
-.live-summary { min-width:0; min-height:0; display:grid; grid-template-columns:minmax(0,1fr); grid-template-rows:repeat(4,auto); gap:7px; align-content:start; }
+.live-summary { min-width:0; min-height:0; display:grid; grid-template-columns:minmax(0,1fr); grid-template-rows:repeat(5,auto); gap:clamp(8px,.55vw,14px); align-content:start; }
 .summary-card, .card, .chart-card { background:var(--surface); border:1px solid var(--line); border-radius:12px; }
-.summary-card { padding:8px 10px; min-width:0; min-height:0; max-width:100%; overflow:hidden; }
-.summary-card .value { font-size:clamp(14px,1.2vw,19px); }
-.landmark-line { display:grid; grid-template-columns:34px minmax(0,1fr) 30px; align-items:center; gap:4px; font-size:11px; padding:3px 0; }
-.landmark-line strong { font-size:11px; font-variant-numeric:tabular-nums; }
-.landmark-line progress { width:100%; height:7px; accent-color:#39a0ff; }
+/* Status column grows with the viewport; its cards never scale the video out of view. */
+.summary-card { padding:clamp(11px,.85vw,18px); min-width:0; min-height:0; max-width:100%; overflow:hidden; }
+.summary-card .label { color:#c4d4ea; font-size:clamp(12px,.78vw,15px); letter-spacing:.055em; }
+.summary-card .value { font-size:clamp(19px,1.35vw,27px); font-variant-numeric:tabular-nums; }
+.summary-card .small { font-size:clamp(12px,.85vw,16px); color:#f1f5ff; line-height:1.4; }
+.landmark-line { display:grid; grid-template-columns:minmax(37px,auto) minmax(25px,1fr) minmax(31px,auto); align-items:center; gap:clamp(5px,.45vw,10px); font-size:clamp(12px,.84vw,16px); padding:clamp(3px,.25vw,6px) 0; }
+.landmark-line strong { font-size:inherit; font-variant-numeric:tabular-nums; text-align:right; }
+.landmark-line progress { width:100%; height:9px; accent-color:#5eb6ff; }
+.fps-card .value { color:#f1f7ff; }
+.fps-cluster { display:grid; gap:5px; min-width:0; align-content:start; }
+.stroke-control { padding:3px 5px 0; min-width:0; }
+.stroke-control-label { display:flex; justify-content:space-between; gap:6px; font-size:clamp(11px,.72vw,13px); color:#c6d6e9; }
+.stroke-control input[type=range] { width:100%; height:16px; margin:2px 0 0; display:block; cursor:pointer; }
+.gon-focus { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1.3fr); gap:12px; padding:clamp(13px,1.3vw,20px); background:#0a1421; border:1px solid #3a567a; border-radius:12px; align-items:center; }
+.gon-position { font-size:clamp(23px,2.1vw,32px); font-weight:800; line-height:1.2; }
+.gon-repeat { color:#eaf3ff; font-size:clamp(17px,1.2vw,21px); font-weight:650; margin-top:8px; }
+.gon-target { color:#fff; font-size:clamp(44px,4vw,66px); font-weight:850; line-height:1.1; text-align:center; font-variant-numeric:tabular-nums; }
+.gon-target-label { color:#d5e6f9; text-align:center; font-weight:650; font-size:clamp(13px,1vw,16px); text-transform:uppercase; letter-spacing:.06em; }
+.gon-instruction { font-size:clamp(17px,1.3vw,21px); font-weight:650; line-height:1.4; color:#fff; }
+#referenceCapture { min-height:52px; font-size:clamp(17px,1.25vw,21px); }
+.gon-feedback { font-size:15px; font-weight:650; margin-top:0; }
+.gon-results > summary { color:#d8eaff; font-weight:650; cursor:pointer; }
+@media (max-width:440px) { .gon-focus { grid-template-columns:1fr 1fr; } .gon-target { font-size:38px; } }
+
 .control-panel { min-width:0; display:grid; gap:10px; }
 .card { padding:12px; min-width:0; max-width:100%; overflow:visible; }
 .card.priority { border-color:#365374; box-shadow:0 0 0 1px rgba(57,160,255,.08); }
@@ -50,7 +69,7 @@ main { display:grid; grid-template-columns:minmax(0,58fr) minmax(380px,42fr); ga
 .small { font-size:13px; color:#d8e3f4; overflow-wrap:anywhere; }
 .note { color:var(--muted); font-size:13px; line-height:1.45; margin-top:7px; overflow-wrap:anywhere; }
 .workflow-step { padding:0; }
-.workflow-step > summary, .auxiliary-panel > summary { min-height:44px; padding:8px 12px; }
+.workflow-step > summary { min-height:44px; padding:8px 12px; }
 .workflow-step[open] > summary { border-bottom:1px solid var(--line); background:#132033; border-radius:12px 12px 0 0; }
 .step-heading { display:flex; align-items:center; gap:10px; min-width:0; }
 .step-number { display:grid; place-items:center; width:24px; height:24px; flex:0 0 auto; border-radius:50%; background:#1a2b42; color:#a9d6ff; font-weight:800; font-size:12px; }
@@ -58,6 +77,11 @@ main { display:grid; grid-template-columns:minmax(0,58fr) minmax(380px,42fr); ga
 .step-status { margin-left:auto; color:var(--muted); font-size:11px; letter-spacing:.06em; text-transform:uppercase; white-space:nowrap; }
 .step-content { padding:14px; }
 .step-content > :first-child { margin-top:0; }
+/* Explanations inside workflow steps must remain legible on dark panels. */
+.workflow-step .step-content, .workflow-step .note, .workflow-step .small,
+.workflow-step .control-help, .workflow-step .control-head,
+.workflow-step .recommendation-values, .workflow-step .control-help b { color:#f1f5ff; }
+.workflow-step .step-content .metric .name { color:#e3edf9; }
 .controls { display:grid; gap:12px; margin-top:10px; }
 .control-row { display:grid; gap:5px; }
 .control-head { display:flex; justify-content:space-between; gap:10px; font-size:14px; color:#c9d5e7; }
@@ -112,10 +136,13 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
   .visual-top { grid-template-columns:1fr; grid-template-rows:auto auto; overflow:visible; }
   .camera-column { height:min(82vh,720px); }
   .video-shell { max-height:82vh; }
-  .live-summary { grid-template-columns:repeat(4,minmax(0,1fr)); grid-template-rows:auto; }
+  .live-summary { grid-template-columns:repeat(5,minmax(0,1fr)); grid-template-rows:auto; }
   .summary-card { overflow:visible; }
   .chart-card { height:auto; }
   .chart-content { height:250px; }
+}
+@media (max-width:850px) {
+  .live-summary { grid-template-columns:repeat(3,minmax(0,1fr)); }
 }
 @media (max-width:760px) {
   main { grid-template-columns:1fr; padding:10px; gap:10px; }
@@ -123,6 +150,10 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
   .camera-column { height:min(78vh,600px); }
   .button-grid { grid-template-columns:1fr 1fr; }
   .results-links { grid-template-columns:1fr; }
+}
+@media (min-width:1800px) {
+  main { gap:18px; padding:16px; }
+  .visual-column { top:16px; height:calc(100vh - 32px); }
 }
 @media (max-width:440px) {
   .live-summary { grid-template-columns:1fr; }
@@ -146,7 +177,11 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
         <div class="landmark-line"><span>Hip</span><progress id="hipConfidenceBar" max="1" value="0"></progress><strong id="hipConfidence">—</strong></div>
         <div class="landmark-line"><span>Knee</span><progress id="kneeConfidenceBar" max="1" value="0"></progress><strong id="kneeConfidence">—</strong></div>
         <div class="landmark-line"><span>Ankle</span><progress id="ankleConfidenceBar" max="1" value="0"></progress><strong id="ankleConfidence">—</strong></div>
-        <div id="fps" class="small">0.0 FPS</div></div>
+      </div>
+      <div class="fps-cluster">
+        <div class="summary-card fps-card"><div class="label">Processing FPS</div><div id="fps" class="value">0.0 FPS</div><div class="small">Vision pipeline</div></div>
+        <div class="stroke-control"><label class="stroke-control-label" for="overlayStroke"><span>Line / arc width</span><span id="overlayStrokeValue">100%</span></label><input id="overlayStroke" type="range" min="40" max="120" step="10" value="100" aria-label="Pose line and angle arc thickness; joint markers unchanged"></div>
+      </div>
     </div>
   </div>
 </section>
@@ -171,28 +206,26 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
     </div>
   </details>
 
-  <details id="referencePanel" class="card auxiliary-panel" data-focus-panel>
-    <summary><span class="step-heading"><span class="step-title">Goniometer / Static Vision Check</span></span><span id="referenceStepStatus" class="step-status">OPTIONAL</span></summary>
-    <div class="step-content" style="display:grid;gap:10px">
-      <div class="note">10 measurements: 90°, 120°, 140°, 160°, 175° · 2 independent placements each. The numerical AI angle stays hidden until the hold ends.</div>
-      <div class="metric" id="referenceProgressCard">
-        <div class="name">STATIC VALIDATION PROGRESS</div>
-        <div class="number" id="referenceProgress">Not started</div>
-        <div class="progress-track"><div class="progress-fill" id="referenceProgressBar"></div></div>
+  <details id="referencePanel" class="card workflow-step" data-workflow-step data-focus-panel>
+    <summary><span class="step-heading"><span class="step-number">2</span><span class="step-title">Goniometer / Static Vision Check</span></span><span id="referenceStepStatus" class="step-status">OPTIONAL</span></summary>
+    <div class="step-content" style="display:grid;gap:12px">
+      <div class="gon-focus" aria-live="polite" aria-atomic="true">
+        <div><div id="referencePosition" class="gon-position">Capture 1 / 10</div><div id="referenceRepeat" class="gon-repeat">Repetition 1 / 2</div></div>
+        <div><div class="gon-target-label">Target angle</div><div id="referenceTarget" class="gon-target">90°</div></div>
       </div>
-      <div id="referenceInstruction" class="small">Use the physical goniometer to set the requested angle. No manual entry is needed.</div>
+      <div id="referenceInstruction" class="gon-instruction">Set your leg to 90° using the physical goniometer.</div>
       <button id="referenceBegin" class="primary" onclick="referenceAction('start_session')">Start 10-position static check</button>
       <button id="referenceCapture" class="primary" onclick="referenceAction('capture')" hidden>Capture 3-second hold</button>
       <button id="referenceNext" class="secondary" onclick="referenceAction('next')" hidden>Move away, reposition and continue</button>
       <button id="referenceClose" class="secondary" onclick="referenceAction('cancel')" hidden>End this session</button>
-      <div id="referenceState" class="note">Optional static comparison; no pose correction is applied.</div>
-      <div id="referenceResults" class="small" style="white-space:pre-wrap"></div>
-      <div class="note">Goniometer placement and 2-D camera geometry introduce uncertainty. This check does not establish dynamic accuracy.</div>
+      <div class="metric" id="referenceProgressCard"><div class="name">STATIC VALIDATION PROGRESS</div><div class="number" id="referenceProgress">0 / 10 accepted captures</div><div class="progress-track"><div class="progress-fill" id="referenceProgressBar"></div></div></div>
+      <div id="referenceState" class="gon-feedback" hidden></div>
+      <details id="referenceResultsPanel" class="gon-results" hidden><summary>Captured results</summary><div id="referenceResults" class="small" style="white-space:pre-wrap"></div></details>
     </div>
   </details>
 
   <details id="calibrationStep" class="card workflow-step calibration-card" data-workflow-step data-focus-panel>
-    <summary><span class="step-heading"><span class="step-number">2</span><span class="step-title">IMU Calibration + Bayesian</span></span><span id="calibrationStepStatus" class="step-status">IDLE</span></summary>
+    <summary><span class="step-heading"><span class="step-number">3</span><span class="step-title">IMU Calibration + Bayesian</span></span><span id="calibrationStepStatus" class="step-status">IDLE</span></summary>
     <div class="step-content">
       <div id="calibrationState" class="value small">READY</div>
       <div id="calibrationMessage" class="note">Start calibration with the static stage, then continue to the dynamic stage.</div>
@@ -207,7 +240,7 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
   </details>
 
   <details id="validationStep" class="card workflow-step" data-workflow-step data-focus-panel>
-    <summary><span class="step-heading"><span class="step-number">3</span><span class="step-title">Independent Validation</span></span><span id="validationStepStatus" class="step-status">IDLE</span></summary>
+    <summary><span class="step-heading"><span class="step-number">4</span><span class="step-title">Independent Validation</span></span><span id="validationStepStatus" class="step-status">IDLE</span></summary>
     <div class="step-content">
       <div id="recording" class="value small">IDLE</div>
       <div class="note">After Bayesian calibration, record a NEW synchronized camera+IMU flexion–extension trial with the unchanged physical setup.</div>
@@ -219,7 +252,7 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
   </details>
 
   <details id="resultsStep" class="card workflow-step" data-workflow-step data-focus-panel>
-    <summary><span class="step-heading"><span class="step-number">4</span><span class="step-title">Results &amp; Exports</span></span><span id="resultsStepStatus" class="step-status">IDLE</span></summary>
+    <summary><span class="step-heading"><span class="step-number">5</span><span class="step-title">Results &amp; Exports</span></span><span id="resultsStepStatus" class="step-status">IDLE</span></summary>
     <div class="step-content">
       <div class="recommendation-card card"><div class="label">Recommended IMU filter settings</div><div id="imuRecommendationState" class="note">Complete both stages of one calibration run to generate data-driven settings.</div><div id="imuRecommendationValues" class="recommendation-values"></div></div>
       <div class="results-links"><a id="referenceExport" class="path-link" href="/exports/recordings/" target="_blank" rel="noopener">Open goniometer validation exports</a><a id="recordingPath" class="path-link" href="/exports/recordings/" target="_blank" rel="noopener">Open recording exports</a><a id="calibrationPath" class="path-link" href="/exports/calibration/" target="_blank" rel="noopener">Open calibration exports</a><a id="heldoutPath" class="path-link" href="/exports/calibration/" target="_blank" rel="noopener">Held-out result will be saved with this calibration run.</a></div>
@@ -279,6 +312,40 @@ const reason=document.getElementById('reason');
 const angle=document.getElementById('angle');
 const rawAngle=document.getElementById('rawAngle');
 const fps=document.getElementById('fps');
+const overlayStroke=document.getElementById('overlayStroke');
+const overlayStrokeValue=document.getElementById('overlayStrokeValue');
+let overlayStrokeTimer=null;
+let overlayStrokeUpdating=false;
+let overlayStrokeTouched=false;
+async function loadOverlayStroke(){
+  try{
+    const response=await fetch('/api/overlay/stroke',{cache:'no-store'});
+    if(!response.ok) return;
+    const body=await response.json();
+    if(overlayStrokeTouched) return;
+    const percent=Math.round(Number(body.stroke_scale)*100);
+    if(Number.isFinite(percent)&&percent>=40&&percent<=120){
+      overlayStroke.value=String(percent);
+      overlayStrokeValue.textContent=percent+'%';
+    }
+  }catch(error){}
+}
+function scheduleOverlayStrokeUpdate(){
+  overlayStrokeTouched=true;
+  overlayStrokeValue.textContent=overlayStroke.value+'%';
+  if(overlayStrokeTimer!==null) clearTimeout(overlayStrokeTimer);
+  overlayStrokeTimer=setTimeout(async()=>{
+    overlayStrokeTimer=null;
+    if(overlayStrokeUpdating){ scheduleOverlayStrokeUpdate(); return; }
+    overlayStrokeUpdating=true;
+    try {
+      const response=await fetch('/api/overlay/stroke',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({stroke_scale:Number(overlayStroke.value)/100})});
+      if(!response.ok) throw new Error('Stroke setting rejected');
+    }catch(error){ console.warn('Overlay stroke update:',error); }
+    finally{ overlayStrokeUpdating=false; }
+  },120);
+}
+overlayStroke.addEventListener('input',scheduleOverlayStrokeUpdate);
 const source=document.getElementById('source');
 const backend=document.getElementById('backend');
 const runtime=document.getElementById('runtime');
@@ -580,6 +647,7 @@ function setReferenceBlind(blind){
 async function referenceAction(action){
   if(referenceRequestPending) return;
   referenceRequestPending=true;
+  window.referenceActionError='';
   if(action==='start_session'||action==='next'){
     setReferenceBlind(true);
     videoStream.removeAttribute('src');
@@ -587,10 +655,13 @@ async function referenceAction(action){
   try{
     const response=await fetch('/api/goniometer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action})});
     const data=await response.json();
-    if(!response.ok){ document.getElementById('referenceState').textContent=data.error||'Capture error';
+    if(!response.ok){
+      window.referenceActionError=data.error||'Capture error';
+      document.getElementById('referenceState').textContent=window.referenceActionError;
+      document.getElementById('referenceState').hidden=false;
       // The server owns blind state; restore it on the next status refresh.
-    }else{ setReferenceBlind(Boolean(data.hide_angle)); updateReference(data); }
-  }catch(error){ document.getElementById('referenceState').textContent=String(error); }
+    }else{ window.referenceActionError=''; setReferenceBlind(Boolean(data.hide_angle)); updateReference(data); }
+  }catch(error){ window.referenceActionError=String(error); document.getElementById('referenceState').textContent=window.referenceActionError; document.getElementById('referenceState').hidden=false; }
   finally{
     referenceRequestPending=false;
     if(action==='start_session'||action==='next') videoStream.src='/video.mjpg?guided='+Date.now();
@@ -615,11 +686,21 @@ function updateReference(g){
   referenceStepStatus.className='step-status '+(complete?'ok':(g.state==='RETRY'?'bad':''));
   const progress=document.getElementById('referenceProgress');
   document.getElementById('referenceProgressBar').style.width=(guide?100*guide.index/guide.total:0)+'%';
-  progress.textContent=guide?`${guide.index} / ${guide.total} accepted captures`:'Not started';
-  document.getElementById('referenceInstruction').textContent=complete?'All 10 positions collected. Inspect results below.':
-    guide?`Position ${guide.index+1} / 10 · ${guide.target_deg}° · repetition ${guide.repeat}/2. Use the physical goniometer to set ${guide.target_deg}°, then hold still for 3 seconds. After Capture, move away before the next repetition.`:
-    'Use the physical goniometer to set the requested angle. No manual entry is needed.';
-  document.getElementById('referenceState').textContent=(g.state||'IDLE')+' · '+(g.message||'');
+  progress.textContent=`${guide?guide.index:0} / 10 accepted captures`;
+  const position=guide?(complete?10:guide.index+1):1;
+  const target=guide&&!complete?guide.target_deg:90;
+  const repetition=guide&&!complete?guide.repeat:1;
+  document.getElementById('referencePosition').textContent=complete?'All 10 captures complete':`Capture ${position} / 10`;
+  document.getElementById('referenceRepeat').textContent=complete?'':`Repetition ${repetition} / 2`;
+  document.getElementById('referenceTarget').textContent=complete?'✓':target+'°';
+  document.getElementById('referenceInstruction').textContent=complete?'Static vision check completed.':
+    captured&&g.state==='MEASURED'?'Capture accepted. Move away, reposition and press Continue.':
+    busy?'Hold still while the 3-second capture completes.':
+    `Set your leg to ${target}° using the physical goniometer, then press Capture.`;
+  const feedback=document.getElementById('referenceState');
+  const feedbackText=window.referenceActionError||(g.state==='RETRY'?(g.message||'Capture not accepted; retry.'):'');
+  feedback.textContent=feedbackText;
+  feedback.hidden=!feedbackText;
   const lines=[];
   for(const row of guide?.captures||[]){
     lines.push(`${row.target_deg}° #${row.repeat_index}: MoveNet raw ${Number(row.raw_mean_deg).toFixed(1)}° · error ${Number(row.raw_error_deg)>=0?'+':''}${Number(row.raw_error_deg).toFixed(1)}°`);
@@ -631,6 +712,7 @@ function updateReference(g){
     document.getElementById('referenceExport').href=guide.report_url;
   }else if(g.result?.report_url){ document.getElementById('referenceExport').href=g.result.report_url; }
   document.getElementById('referenceResults').textContent=lines.join('\n');
+  document.getElementById('referenceResultsPanel').hidden=lines.length===0;
 }
 function updateImuRecommendations(cal){
   const p=(cal&&cal.recommended_parameters)||{};
@@ -787,7 +869,7 @@ async function refresh(){
     if(!window.tuningLoaded && s.tuning){ loadTuning(s.tuning); window.tuningLoaded=true; }
   } catch(e) { runtime.textContent='UI connection error: '+e; }
 }
-setInterval(refresh,350); setInterval(refreshHistory,700); refresh(); refreshHistory(); resizeVideoShell();
+setInterval(refresh,350); setInterval(refreshHistory,700); refresh(); refreshHistory(); resizeVideoShell(); loadOverlayStroke();
 </script>
 </body>
 </html>
@@ -827,6 +909,20 @@ def create_app(runtime: VisionRuntime) -> Any:
     @app.get("/api/status")
     def status() -> Any:
         return jsonify(runtime.status())
+
+    @app.get("/api/overlay/stroke")
+    def get_overlay_stroke() -> Any:
+        return jsonify(runtime.overlay_stroke_status())
+
+    @app.post("/api/overlay/stroke")
+    def set_overlay_stroke() -> Any:
+        payload = request.get_json(silent=True)
+        try:
+            if not isinstance(payload, dict) or "stroke_scale" not in payload:
+                raise ValueError("stroke_scale is required")
+            return jsonify(runtime.set_overlay_stroke_scale(payload["stroke_scale"]))
+        except (TypeError, ValueError) as exc:
+            return jsonify({"error": str(exc)}), 400
 
     @app.post("/api/positioning")
     def positioning_action() -> Any:

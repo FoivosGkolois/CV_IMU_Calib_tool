@@ -27,6 +27,7 @@ def draw_leg_overlay(
     recording_active: bool = False,
     hide_angle: bool = False,
     positioning: dict | None = None,
+    stroke_scale: float = 1.0,
 ) -> Any:
     """Return the live camera frame with pose geometry and compact status.
 
@@ -44,11 +45,13 @@ def draw_leg_overlay(
         knee = _pixel(leg.knee.x, leg.knee.y, width, height)
         ankle = _pixel(leg.ankle.x, leg.ankle.y, width, height)
 
-        line_width = max(5, int(round(min(width, height) * 0.012)))
+        base_line_width = max(5, int(round(min(width, height) * 0.012)))
+        line_width = max(1, int(round(base_line_width * stroke_scale)))
         joint_radius = max(6, int(round(min(width, height) * 0.014)))
         cv2.line(output, hip, knee, THIGH_COLOR, line_width, cv2.LINE_AA)
         cv2.line(output, knee, ankle, SHANK_COLOR, line_width, cv2.LINE_AA)
-        _draw_knee_arc(output, hip, knee, ankle, angle, hide_angle=hide_angle)
+        _draw_knee_arc(output, hip, knee, ankle, angle, hide_angle=hide_angle,
+                       stroke_scale=stroke_scale)
 
         for point in (hip, knee, ankle):
             cv2.circle(output, point, joint_radius + 3, (10, 10, 10), -1, cv2.LINE_AA)
@@ -118,7 +121,7 @@ def _draw_knee_arc(
     knee: tuple[int, int],
     ankle: tuple[int, int],
     angle: KneeAngleResult,
-    *, hide_angle: bool = False,
+    *, hide_angle: bool = False, stroke_scale: float = 1.0,
 ) -> None:
     cv2 = _load_cv2()
     thigh_length = math.hypot(hip[0] - knee[0], hip[1] - knee[1])
@@ -129,7 +132,8 @@ def _draw_knee_arc(
     sweep_deg = _shortest_signed_angle_deg(start_deg, end_deg)
     points = _sample_arc_points(knee, radius, start_deg, sweep_deg)
     if len(points) >= 2:
-        cv2.polylines(frame, [points], False, ARC_COLOR, 4, cv2.LINE_AA)
+        cv2.polylines(frame, [points], False, ARC_COLOR,
+                      max(1, int(round(4 * stroke_scale))), cv2.LINE_AA)
 
     mid_deg = start_deg + 0.5 * sweep_deg
     label_radius = radius + 25

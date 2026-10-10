@@ -6,19 +6,22 @@ from computer.vision_imu_calibration.tuning import FrameRotation, RuntimeTuning
 from computer.vision_imu_calibration.web_app import _PAGE
 
 
-def test_workflow_has_four_ordered_single_open_primary_steps() -> None:
+def test_workflow_has_five_ordered_single_open_primary_steps() -> None:
     step_ids = re.findall(
         r'<details id="([^"]+)" class="card workflow-step[^"]*"[^>]*data-workflow-step[^>]*>',
         _PAGE,
     )
     assert step_ids == [
         "cameraSetupStep",
+        "referencePanel",
         "calibrationStep",
         "validationStep",
         "resultsStep",
     ]
-    assert _PAGE.count("data-workflow-step") == 4
-    assert 'id="referencePanel" class="card auxiliary-panel" data-focus-panel' in _PAGE
+    assert _PAGE.count("data-workflow-step") == 5
+    assert 'id="referencePanel" class="card workflow-step" data-workflow-step data-focus-panel' in _PAGE
+    numbered = re.findall(r'<span class="step-number">(\d+)</span>', _PAGE)
+    assert numbered == ["1", "2", "3", "4", "5"]
     assert _PAGE.count("data-focus-panel open") == 1
 
     accordion = _PAGE.split("let accordionSync=false;", 1)[1].split(
@@ -50,7 +53,7 @@ def test_compact_status_and_collapsible_chart_preserve_camera_space() -> None:
     assert 'id="angleChart"' not in visual
     assert controls.index('id="liveChartPanel"') < controls.index('id="imuReadySummary"')
     assert '<details id="liveChartPanel" class="chart-card">' in controls
-    assert "grid-template-rows:repeat(4,auto)" in _PAGE
+    assert "grid-template-rows:repeat(5,auto)" in _PAGE
     assert "grid-template-rows:minmax(0,1fr) clamp(210px,28vh,290px)" not in _PAGE
     assert "liveChartPanel.addEventListener('toggle'" in _PAGE
     assert "observer.observe(angleChart.parentElement);" in _PAGE
@@ -67,7 +70,7 @@ def test_five_pose_sliders_live_only_under_advanced_and_defaults_are_unchanged()
     ):
         assert _PAGE.count(f'id="{slider_id}"') == 1
         assert f'id="{slider_id}"' in advanced
-    assert _PAGE.count('type="range"') == 5
+    assert _PAGE.count('type="range"') == 6  # Five pose tuning controls plus overlay-only width.
     assert 'id="applyPoseSettings"' in advanced
     assert 'id="savePosePreset"' in advanced
     assert "fetch('/api/tuning/preset'" in _PAGE
@@ -160,3 +163,20 @@ def test_advanced_diagnostics_contains_nonessential_runtime_controls() -> None:
     ):
         assert f'id="{element_id}"' in advanced
     assert "Advanced / Diagnostics</span></summary>" in _PAGE
+
+
+def test_responsive_status_fps_and_step_contrast() -> None:
+    visual = _PAGE.split('<section class="visual-column"', 1)[1].split('</section>', 1)[0]
+    assert visual.count('class="summary-card') == 5
+    assert visual.count('id="fps"') == 1
+    assert visual.index('id="ankleConfidence"') < visual.index('class="summary-card fps-card"')
+    assert 'id="fps" class="value"' in visual
+    assert 'clamp(180px,27%,280px)' in _PAGE
+    assert 'repeat(5,minmax(0,1fr))' in _PAGE
+    assert '@media (max-width:850px)' in _PAGE
+    assert '@media (max-width:760px)' in _PAGE
+    assert '@media (max-width:440px)' in _PAGE
+    assert '.workflow-step .note' in _PAGE
+    assert '.workflow-step .control-help' in _PAGE
+    assert 'color:#f1f5ff' in _PAGE
+    assert "fps.textContent=Number(s.inference_fps).toFixed(1)+' FPS';" in _PAGE
