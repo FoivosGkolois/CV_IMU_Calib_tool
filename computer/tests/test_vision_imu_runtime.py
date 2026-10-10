@@ -553,7 +553,7 @@ def test_pose_preset_is_versioned_atomic_and_loaded_on_restart(tmp_path: Path) -
         recording_root=recording_root, calibration_root=calibration_root,
     )  # type: ignore[arg-type]
     assert "Could not load saved pose settings" in rejected.pose_preset_status()["error"]
-    assert rejected.tuning()["confidence_threshold"] == 0.30
+    assert rejected.tuning()["confidence_threshold"] == 0.29
 
 
 def test_pose_change_invalidates_calibration_and_is_blocked_during_recording(

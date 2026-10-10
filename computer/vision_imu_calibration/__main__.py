@@ -57,7 +57,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--pose-model", choices=("thunder", "lightning"), default="thunder",
         help="MoveNet variant (default: thunder for backwards-compatible PC runs)",
     )
-    parser.add_argument("--confidence", type=float, default=0.30)
+    parser.add_argument("--confidence", type=float, default=0.29)
+    parser.add_argument("--final-pose-lock", action="store_true",
+                        help="Use selected pose-filter values and ignore old mutable presets")
     parser.add_argument("--inference-threads", type=int, default=4)
     parser.add_argument(
         "--no-smart-crop",
@@ -154,6 +156,7 @@ def main(argv: list[str] | None = None) -> int:
         estimator,
         leg_side=LegSide(args.leg),
         confidence_threshold=args.confidence,
+        pose_filters_locked=args.final_pose_lock,
         recording_root=recording_root,
         calibration_root=calibration_root,
         imu_source=imu_source,

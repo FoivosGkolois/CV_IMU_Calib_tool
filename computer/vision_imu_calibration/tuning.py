@@ -25,9 +25,9 @@ class RuntimeTuning:
 
     leg_side: LegSide = LegSide.RIGHT
     frame_rotation: FrameRotation = FrameRotation.COUNTERCLOCKWISE_90
-    confidence_threshold: float = 0.30
-    landmark_smoothing: float = 0.55
-    angle_smoothing: float = 0.35
+    confidence_threshold: float = 0.29
+    landmark_smoothing: float = 0.30
+    angle_smoothing: float = 0.70
     min_segment_length: float = 0.025
     max_angle_jump_deg: float = 45.0
 

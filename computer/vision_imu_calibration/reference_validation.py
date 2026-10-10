@@ -37,44 +37,105 @@ def measured_reference(value: object) -> float:
     return reference
 
 
+# At 1280x720 the full vision pipeline may only produce ~5 processed FPS.
+# Stationarity is evaluated in degrees, not from absolute image landmark motion:
+# the latter mixes pose-model jitter, small body translations, and actual rotation.
+GUIDED_MIN_VALID_FRAMES = 8
+GUIDED_MIN_VALID_FRACTION = 0.70
+GUIDED_MAX_GAP_S = 1.0
+GUIDED_MIN_VALID_SPAN_S = 2.0
+GUIDED_MAX_CORE_ANGLE_SPAN_DEG = 8.0
+GUIDED_MAX_END_TO_END_DRIFT_DEG = 5.0
+
+
+def _percentile(values: list[float], fraction: float) -> float:
+    ordered = sorted(values)
+    position = (len(ordered) - 1) * fraction
+    lower = math.floor(position)
+    upper = math.ceil(position)
+    weight = position - lower
+    return ordered[lower] * (1 - weight) + ordered[upper] * weight
+
+
 def evaluate_static_samples(samples: list[dict], *, start_ns: int | None = None,
                             end_ns: int | None = None) -> dict:
-    """Validate existing synchronized observations, without filtering/inference.
+    """Accept a guided 3-second hold with time coverage and robust angular stability.
 
-    A 3 s capture needs >=15 frames spanning >=2 s; gaps >0.75 s or any
-    dropout fail. Raw angle range >3 deg or raw point range >2% of the frame
-    fails a stationary hold. Conservative lab defaults, not accuracy claims.
+    Tolerates isolated tracking dropouts and pixel-level landmark jitter; still
+    rejects low frame coverage, long temporal gaps, leg swaps, invalid values,
+    and substantial knee-angle movement. Raw/filtered variation is retained in
+    the report and is NOT confused with angle accuracy against the goniometer.
     """
     reason = ""
     valid = [s for s in samples if s.get("valid") is True]
-    if len(valid) != len(samples):
-        reason = "Pose dropout / low confidence / point outside safe area"
-    if len(valid) < 15:
-        reason = reason or "Too few valid frames (need 15); retry"
-    times = [s["host_monotonic_ns"] / 1e9 for s in samples]
-    if not times or times[-1] - times[0] < 2:
+    coverage = len(valid) / len(samples) if samples else 0.0
+    if len(valid) < GUIDED_MIN_VALID_FRAMES:
+        reason = "Too few valid frames (need 8); retry"
+    elif coverage < GUIDED_MIN_VALID_FRACTION:
+        reason = "Insufficient valid tracking coverage (need 70%); retry"
+
+    try:
+        times = [s["host_monotonic_ns"] / 1e9 for s in samples]
+        valid_times = [s["host_monotonic_ns"] / 1e9 for s in valid]
+    except (KeyError, TypeError, ValueError):
+        times, valid_times = [], []
+        reason = reason or "Missing camera timestamps; retry"
+    if any(not math.isfinite(t) for t in times):
+        reason = reason or "Invalid camera timestamps; retry"
+    if not times or times[-1] - times[0] < GUIDED_MIN_VALID_SPAN_S:
         reason = reason or "Hold too short / camera interrupted; retry"
-    if any(not 0 < b - a <= 0.75 for a, b in zip(times, times[1:])):
+    if len(valid_times) < 2 or valid_times[-1] - valid_times[0] < GUIDED_MIN_VALID_SPAN_S:
+        reason = reason or "Insufficient valid camera time coverage; retry"
+    if any(not 0 < b - a <= GUIDED_MAX_GAP_S for a, b in zip(times, times[1:])):
         reason = reason or "Camera sample gap; retry"
-    if times and ((start_ns is not None and not 0 <= times[0] - start_ns / 1e9 <= 0.75)
-                  or (end_ns is not None and not 0 <= end_ns / 1e9 - times[-1] <= 0.75)):
-        reason = reason or "Camera samples missing at start/end of hold; retry"
+    if any(not 0 < b - a <= GUIDED_MAX_GAP_S for a, b in zip(valid_times, valid_times[1:])):
+        reason = reason or "Valid tracking gap; retry"
+    if valid_times and ((start_ns is not None and not 0 <= valid_times[0] - start_ns / 1e9 <= GUIDED_MAX_GAP_S)
+                        or (end_ns is not None and not 0 <= end_ns / 1e9 - valid_times[-1] <= GUIDED_MAX_GAP_S)):
+        reason = reason or "Valid camera samples missing near hold start/end; retry"
     if len({s.get("tracked_leg") for s in valid}) > 1:
         reason = reason or "Tracked leg changed; retry"
+
+    angles: dict[str, list[float]] = {}
     for key in ANGLE_COLUMNS:
         values = [s.get(key) for s in valid]
-        if any(v is None or not math.isfinite(v) or not 0 <= v <= 180 for v in values):
+        if any(not isinstance(v, (int, float)) or not math.isfinite(v) or not 0 <= v <= 180
+               for v in values):
             reason = reason or "Missing / nonfinite angle; retry"
-        elif values and max(values) - min(values) > 3:
-            reason = reason or "Moving hold (angle changed >3 deg); retry"
+        else:
+            angles[key] = [float(v) for v in values]
+
     for key in ("hip_x", "hip_y", "knee_x", "knee_y", "ankle_x", "ankle_y"):
         values = [s.get(key) for s in valid]
-        if any(v is None or not math.isfinite(v) for v in values):
-            reason = reason or "Missing / nonfinite landmark; retry"
-        elif values and max(values) - min(values) > 0.02:
-            reason = reason or "Moving hold (landmark moved >2% of frame); retry"
+        if any(not isinstance(v, (int, float)) or not math.isfinite(v) or not 0 <= v <= 1
+               for v in values):
+            reason = reason or "Missing / invalid landmark; retry"
+
+    stability: dict[str, dict[str, float]] = {}
+    for key, values in angles.items():
+        if not values:
+            continue
+        edge_count = max(2, len(values) // 3)
+        core_span = _percentile(values, 0.8) - _percentile(values, 0.2)
+        end_to_end_drift = abs(statistics.median(values[:edge_count]) - statistics.median(values[-edge_count:]))
+        stability[key] = {"full_range_deg": max(values) - min(values),
+                          "central_20_80_range_deg": core_span,
+                          "early_late_median_shift_deg": end_to_end_drift}
+    filtered = stability.get("visual_knee_angle_deg")
+    if filtered and (filtered["central_20_80_range_deg"] > GUIDED_MAX_CORE_ANGLE_SPAN_DEG
+                     or filtered["early_late_median_shift_deg"] > GUIDED_MAX_END_TO_END_DRIFT_DEG):
+        reason = reason or "Knee angle moved substantially during hold; retry"
+
     return {"accepted": not reason, "reason": reason, "frames_total": len(samples),
-            "frames_valid": len(valid), "coverage": len(valid) / len(samples) if samples else 0.0}
+            "frames_valid": len(valid), "coverage": coverage,
+            "valid_time_span_s": valid_times[-1] - valid_times[0] if len(valid_times) > 1 else 0.0,
+            "stability_deg": stability,
+            "criteria": {"min_valid_frames": GUIDED_MIN_VALID_FRAMES,
+                         "min_valid_fraction": GUIDED_MIN_VALID_FRACTION,
+                         "min_valid_span_s": GUIDED_MIN_VALID_SPAN_S,
+                         "max_valid_gap_s": GUIDED_MAX_GAP_S,
+                         "max_filtered_central_span_deg": GUIDED_MAX_CORE_ANGLE_SPAN_DEG,
+                         "max_filtered_early_late_shift_deg": GUIDED_MAX_END_TO_END_DRIFT_DEG}}
 
 
 def guided_capture_report(path: Path, inputs: dict, samples: list[dict]) -> dict:
@@ -82,9 +143,9 @@ def guided_capture_report(path: Path, inputs: dict, samples: list[dict]) -> dict
     hold = evaluate_static_samples(samples, start_ns=inputs.get("hold_start_host_monotonic_ns"),
                                    end_ns=inputs.get("hold_end_host_monotonic_ns"))
     metrics = evaluate_recording(path, reference_angle_deg=reference, trim_seconds=0,
-                                 min_valid_frames=15)
-    if not metrics["sufficient_data"] or metrics["valid_tracking_fraction"] != 1:
-        hold.update(accepted=False, reason=hold["reason"] or "Recording has missing / invalid frames")
+                                 min_valid_frames=GUIDED_MIN_VALID_FRAMES)
+    if not metrics["sufficient_data"]:
+        hold.update(accepted=False, reason=hold["reason"] or "Recording has too few valid frames")
     if metrics["frames_total"] != len(samples):
         hold.update(accepted=False, reason="Recording/sample coverage mismatch; retry")
     return {"schema_version": 1, **inputs, "recording_zip": path.name,

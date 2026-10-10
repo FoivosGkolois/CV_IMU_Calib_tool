@@ -53,7 +53,8 @@ def test_signed_errors_use_measured_reference_instead_of_prompt_and_repeat_clean
     assert result["metrics"]["raw"]["mean_deg"] != result["metrics"]["filtered"]["mean_deg"]
     assert result["hold"]["coverage"] == 1
     failed_rows = samples()
-    failed_rows[5]["valid"] = False
+    for i in range(5, 14):
+        failed_rows[i]["valid"] = False
     second = tmp_path / "two.zip"
     archive(second, failed_rows)
     failed = guided_capture_report(second, {"target_deg": 120, "reference_angle_deg": 119}, failed_rows)
@@ -67,21 +68,38 @@ def test_signed_errors_use_measured_reference_instead_of_prompt_and_repeat_clean
 
 
 @pytest.mark.parametrize("change,reason", [
-    (lambda r: r[4].update(valid=False), "dropout"),
-    (lambda r: r[4].update(raw_knee_angle_deg=130), "Moving hold"),
     (lambda r: r[4].update(visual_knee_angle_deg=float("nan")), "nonfinite"),
-    (lambda r: r[4].update(hip_x=.55), "landmark moved"),
     (lambda r: r[4].update(ankle_x=None), "landmark"),
     (lambda r: r[4].update(tracked_leg="left"), "leg changed"),
     (lambda r: r[4].update(host_monotonic_ns=r[3]["host_monotonic_ns"]), "gap"),
-    (lambda r: r.__delitem__(slice(0, 12)), "Too few"),
+    (lambda r: r.__delitem__(slice(0, 15)), "Too few"),
 ])
-def test_stationary_hold_rejects_dropout_movement_missing_and_insufficient(change, reason):
+def test_stationary_hold_still_rejects_corrupt_data_and_insufficient_coverage(change, reason):
     rows = samples()
     change(rows)
     result = evaluate_static_samples(rows)
     assert not result["accepted"]
-    assert reason in result["reason"]
+    assert reason.lower() in result["reason"].lower()
+
+
+def test_stationary_hold_tolerates_operator_and_pose_jitter():
+    rows = samples()
+    rows[4]["raw_knee_angle_deg"] = 133.0  # isolated model outlier
+    rows[5]["valid"] = False  # isolated tracking dropout
+    rows[8]["hip_x"] = 0.55  # operator sway, not knee flexion
+    result = evaluate_static_samples(rows)
+    assert result["accepted"]
+    assert result["coverage"] == pytest.approx(20 / 21)
+    assert result["stability_deg"]["raw_knee_angle_deg"]["full_range_deg"] > 10
+
+
+def test_stationary_hold_rejects_sustained_angle_movement():
+    rows = samples()
+    for i, row in enumerate(rows):
+        row["visual_knee_angle_deg"] = 120.0 + 12.0 * i / (len(rows) - 1)
+    result = evaluate_static_samples(rows)
+    assert not result["accepted"]
+    assert "Knee angle moved" in result["reason"]
 
 
 def test_hold_checks_unobserved_head_tail_gaps_and_recorder_coverage(tmp_path):
@@ -115,6 +133,7 @@ def runtime(tmp_path):
 
 
 def test_gui_controls_endpoints_and_entry_blindness_leave_underlying_samples_unchanged(tmp_path):
+    pytest.importorskip("flask")
     r = runtime(tmp_path)
     client = create_app(r).test_client()
     html = client.get("/").get_data(as_text=True)
@@ -272,18 +291,19 @@ def test_real_runtime_and_existing_recorder_capture_four_synthetic_holds_and_rep
         r.reference_action("capture", {})
         time.sleep(.5)
         estimator.dropout = True
-        time.sleep(.25)
+        time.sleep(1.4)  # sustained loss, unlike a tolerated isolated dropout
         estimator.dropout = False
         wait_for(lambda: r.reference_status()["state"] not in {"CAPTURING", "FINALIZING"})
         assert r.reference_status()["state"] == "RETRY"
         assert [c["capture_id"] for c in r.reference_status()["captures"]] == accepted_ids
         # Export paths use the existing browser directory route.
-        client = create_app(r).test_client()
         first = r.reference_status()["captures"][0]
-        assert client.get(first["report_url"]).status_code == 200
-        archive_response = client.get(first["download_url"])
-        assert archive_response.status_code == 200
-        archive_response.close()
+        if __import__("importlib").util.find_spec("flask") is not None:
+            client = create_app(r).test_client()
+            assert client.get(first["report_url"]).status_code == 200
+            archive_response = client.get(first["download_url"])
+            assert archive_response.status_code == 200
+            archive_response.close()
         with ZipFile(r._reference_root / first["recording_zip"]) as zipped:
             metadata = json.loads(zipped.read("recording_metadata.json"))
             assert metadata["goniometer_reference"]["reference_angle_deg"] == 89

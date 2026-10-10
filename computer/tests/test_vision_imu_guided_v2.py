@@ -103,7 +103,7 @@ def test_tuning_history_keeps_native_observation_and_leg_scores(tmp_path):
 
 def test_overlay_stroke_is_session_only_and_strictly_validated(tmp_path):
     r = make_runtime(tmp_path)
-    assert r._overlay_stroke_scale == 1.0
+    assert r._overlay_stroke_scale == 0.70
     assert r.set_overlay_stroke_scale(0.4) == {"stroke_scale": 0.4}
     assert r._overlay_stroke_scale == 0.4
     assert r.overlay_stroke_status() == {"stroke_scale": 0.4}
@@ -111,7 +111,7 @@ def test_overlay_stroke_is_session_only_and_strictly_validated(tmp_path):
         with pytest.raises(ValueError):
             r.set_overlay_stroke_scale(rejected)
     # Pose tuning and calibration profile are untouched by this presentation-only setting.
-    assert r._tuning.confidence_threshold == 0.30
+    assert r._tuning.confidence_threshold == 0.29
     assert "stroke_scale" not in r._vision_setup()["tuning"]
 
 
@@ -122,6 +122,6 @@ def test_goniometer_prominent_capture_display_and_no_redundant_help():
         assert part in _PAGE
     assert 'Goniometer placement and 2-D camera geometry introduce uncertainty' not in _PAGE
     assert 'Position ${guide.index+1} / 10' not in _PAGE
-    assert 'id="overlayStroke"' in _PAGE
-    assert 'id="overlayStrokeValue"' in _PAGE
-    assert "fetch('/api/overlay/stroke'" in _PAGE
+    assert 'id="overlayStroke"' not in _PAGE
+    assert 'id="overlayStrokeValue"' not in _PAGE
+    assert "fetch('/api/overlay/stroke'" not in _PAGE

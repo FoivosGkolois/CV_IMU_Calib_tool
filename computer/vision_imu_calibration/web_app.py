@@ -42,9 +42,6 @@ main { display:grid; grid-template-columns:minmax(0,58fr) minmax(380px,42fr); ga
 .landmark-line progress { width:100%; height:9px; accent-color:#5eb6ff; }
 .fps-card .value { color:#f1f7ff; }
 .fps-cluster { display:grid; gap:5px; min-width:0; align-content:start; }
-.stroke-control { padding:3px 5px 0; min-width:0; }
-.stroke-control-label { display:flex; justify-content:space-between; gap:6px; font-size:clamp(11px,.72vw,13px); color:#c6d6e9; }
-.stroke-control input[type=range] { width:100%; height:16px; margin:2px 0 0; display:block; cursor:pointer; }
 .gon-focus { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1.3fr); gap:12px; padding:clamp(13px,1.3vw,20px); background:#0a1421; border:1px solid #3a567a; border-radius:12px; align-items:center; }
 .gon-position { font-size:clamp(23px,2.1vw,32px); font-weight:800; line-height:1.2; }
 .gon-repeat { color:#eaf3ff; font-size:clamp(17px,1.2vw,21px); font-weight:650; margin-top:8px; }
@@ -180,7 +177,6 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
       </div>
       <div class="fps-cluster">
         <div class="summary-card fps-card"><div class="label">Processing FPS</div><div id="fps" class="value">0.0 FPS</div><div class="small">Vision pipeline</div></div>
-        <div class="stroke-control"><label class="stroke-control-label" for="overlayStroke"><span>Line / arc width</span><span id="overlayStrokeValue">100%</span></label><input id="overlayStroke" type="range" min="40" max="120" step="10" value="100" aria-label="Pose line and angle arc thickness; joint markers unchanged"></div>
       </div>
     </div>
   </div>
@@ -202,7 +198,7 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
       <div class="control-row"><label class="control-head" for="legSide">Tracked leg</label><select id="legSide"><option value="auto">Auto</option><option value="left">Left</option><option value="right">Right</option></select><div class="control-help"><b>Auto:</b> highest-confidence leg. <b>Left/Right:</b> locks the corrected user-facing side.</div></div>
       <div class="control-row"><label class="control-head" for="frameRotation">Frame rotation</label><select id="frameRotation"><option value="counterclockwise_90" selected>90° counter-clockwise</option><option value="none">0°</option><option value="clockwise_90">90° clockwise</option><option value="rotate_180">180°</option></select><div class="control-help">Default for the current portrait camera mounting.</div></div>
       <button id="applyCameraSetup" class="primary" onclick="applyCameraSetup()">Apply leg and rotation</button>
-      <div id="tuningMessage" class="note">Advanced pose settings remain active and can be reviewed below.</div>
+      <div id="tuningMessage" class="note">Pose filter settings are fixed for the selected configuration.</div>
     </div>
   </details>
 
@@ -262,17 +258,8 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
   <details class="card" data-focus-panel>
     <summary><span class="label">Advanced / Diagnostics</span></summary>
     <div class="step-content">
-      <div class="label">Pose settings</div><a class="path-link" href="/pose-tuning" target="_blank" rel="noopener">Open standalone UNO Q Pose Tuning Laboratory</a>
-      <div class="note">Factory defaults remain unchanged. Session changes invalidate stale calibration reuse.</div>
-      <div class="controls">
-        <div class="control-row"><div class="control-head"><span>Acceptance confidence</span><span id="confidenceThresholdValue">0.30</span></div><input id="confidenceThreshold" type="range" min="0.05" max="0.99" step="0.01"></div>
-        <div class="control-row"><div class="control-head"><span>Landmark smoothing</span><span id="landmarkSmoothingValue">0.55</span></div><input id="landmarkSmoothing" type="range" min="0" max="0.95" step="0.01"></div>
-        <div class="control-row"><div class="control-head"><span>Angle smoothing</span><span id="angleSmoothingValue">0.35</span></div><input id="angleSmoothing" type="range" min="0" max="0.95" step="0.01"></div>
-        <div class="control-row"><div class="control-head"><span>Minimum visible segment</span><span id="segmentLengthValue">0.025</span></div><input id="segmentLength" type="range" min="0.005" max="0.20" step="0.005"></div>
-        <div class="control-row"><div class="control-head"><span>Maximum angle jump</span><span id="angleJumpValue">45°</span></div><input id="angleJump" type="range" min="5" max="180" step="1"></div>
-      </div>
-      <div class="button-grid"><button id="applyPoseSettings" class="secondary" onclick="applyPoseSettings()">Apply for session</button><button id="savePosePreset" class="primary" onclick="savePosePreset()">Save as Default</button></div>
-      <div id="posePresetMessage" class="note">No saved preset status yet.</div>
+      <div class="label">Pose filters · selected configuration</div>
+      <div class="note">Fixed for this UNO Q release: confidence 0.29 · landmark smoothing 0.30 · angle smoothing 0.70 · minimum segment 0.025 · maximum jump 45°.</div>
       <hr><div class="label">General recording</div><div id="generalRecordingStatus" class="value small">IDLE</div><div class="button-grid"><button id="startGeneralRecording" class="record" onclick="recordStart(false)">Start general recording</button><button id="stopGeneralRecording" class="stop" onclick="recordStop()">Stop recording</button></div>
       <div class="label">Raw IMU source</div><div id="imuState" class="value small">DISCONNECTED</div>
       <div id="imuSerialControls"><div class="inline-grid"><select id="imuPort"><option value="">Select COM port</option></select><button class="secondary" onclick="refreshImuPorts()">Refresh</button></div><div class="button-grid"><button id="imuConnect" class="primary" onclick="connectImu()">Connect</button><button id="imuDisconnect" class="stop" onclick="disconnectImu()">Disconnect</button></div></div>
@@ -289,19 +276,6 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
 const legSide=document.getElementById('legSide');
 const frameRotation=document.getElementById('frameRotation');
 const tuningMessage=document.getElementById('tuningMessage');
-const confidenceThreshold=document.getElementById('confidenceThreshold');
-const landmarkSmoothing=document.getElementById('landmarkSmoothing');
-const angleSmoothing=document.getElementById('angleSmoothing');
-const segmentLength=document.getElementById('segmentLength');
-const angleJump=document.getElementById('angleJump');
-const confidenceThresholdValue=document.getElementById('confidenceThresholdValue');
-const landmarkSmoothingValue=document.getElementById('landmarkSmoothingValue');
-const angleSmoothingValue=document.getElementById('angleSmoothingValue');
-const segmentLengthValue=document.getElementById('segmentLengthValue');
-const angleJumpValue=document.getElementById('angleJumpValue');
-const applyPoseSettingsButton=document.getElementById('applyPoseSettings');
-const savePosePresetButton=document.getElementById('savePosePreset');
-const posePresetMessage=document.getElementById('posePresetMessage');
 const imuReadySummary=document.getElementById('imuReadySummary');
 const cameraSetupStepStatus=document.getElementById('cameraSetupStepStatus');
 const referenceStepStatus=document.getElementById('referenceStepStatus');
@@ -312,40 +286,6 @@ const reason=document.getElementById('reason');
 const angle=document.getElementById('angle');
 const rawAngle=document.getElementById('rawAngle');
 const fps=document.getElementById('fps');
-const overlayStroke=document.getElementById('overlayStroke');
-const overlayStrokeValue=document.getElementById('overlayStrokeValue');
-let overlayStrokeTimer=null;
-let overlayStrokeUpdating=false;
-let overlayStrokeTouched=false;
-async function loadOverlayStroke(){
-  try{
-    const response=await fetch('/api/overlay/stroke',{cache:'no-store'});
-    if(!response.ok) return;
-    const body=await response.json();
-    if(overlayStrokeTouched) return;
-    const percent=Math.round(Number(body.stroke_scale)*100);
-    if(Number.isFinite(percent)&&percent>=40&&percent<=120){
-      overlayStroke.value=String(percent);
-      overlayStrokeValue.textContent=percent+'%';
-    }
-  }catch(error){}
-}
-function scheduleOverlayStrokeUpdate(){
-  overlayStrokeTouched=true;
-  overlayStrokeValue.textContent=overlayStroke.value+'%';
-  if(overlayStrokeTimer!==null) clearTimeout(overlayStrokeTimer);
-  overlayStrokeTimer=setTimeout(async()=>{
-    overlayStrokeTimer=null;
-    if(overlayStrokeUpdating){ scheduleOverlayStrokeUpdate(); return; }
-    overlayStrokeUpdating=true;
-    try {
-      const response=await fetch('/api/overlay/stroke',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({stroke_scale:Number(overlayStroke.value)/100})});
-      if(!response.ok) throw new Error('Stroke setting rejected');
-    }catch(error){ console.warn('Overlay stroke update:',error); }
-    finally{ overlayStrokeUpdating=false; }
-  },120);
-}
-overlayStroke.addEventListener('input',scheduleOverlayStrokeUpdate);
 const source=document.getElementById('source');
 const backend=document.getElementById('backend');
 const runtime=document.getElementById('runtime');
@@ -436,30 +376,10 @@ for(const step of document.querySelectorAll('details[data-focus-panel]')){
     accordionSync=false;
   });
 }
-function updateSliderLabels(){
-  confidenceThresholdValue.textContent=Number(confidenceThreshold.value).toFixed(2);
-  landmarkSmoothingValue.textContent=Number(landmarkSmoothing.value).toFixed(2);
-  angleSmoothingValue.textContent=Number(angleSmoothing.value).toFixed(2);
-  segmentLengthValue.textContent=Number(segmentLength.value).toFixed(3);
-  angleJumpValue.textContent=Number(angleJump.value).toFixed(0)+'°';
-}
-let poseControlsDirty=false;
-for(const slider of [confidenceThreshold,landmarkSmoothing,angleSmoothing,segmentLength,angleJump]) slider.addEventListener('input',()=>{
-  updateSliderLabels();
-  poseControlsDirty=true;
-  posePresetMessage.textContent='Unsaved slider changes.';
-});
 function loadTuning(t){
   if(!t) return;
   if(t.leg_side!==undefined) legSide.value=t.leg_side;
   if(t.frame_rotation!==undefined) frameRotation.value=t.frame_rotation;
-  if(t.confidence_threshold!==undefined) confidenceThreshold.value=t.confidence_threshold;
-  if(t.landmark_smoothing!==undefined) landmarkSmoothing.value=t.landmark_smoothing;
-  if(t.angle_smoothing!==undefined) angleSmoothing.value=t.angle_smoothing;
-  if(t.min_segment_length!==undefined) segmentLength.value=t.min_segment_length;
-  if(t.max_angle_jump_deg!==undefined) angleJump.value=t.max_angle_jump_deg;
-  updateSliderLabels();
-  poseControlsDirty=false;
 }
 async function applyCameraSetup(){
   const payload={leg_side:legSide.value,frame_rotation:frameRotation.value};
@@ -467,21 +387,6 @@ async function applyCameraSetup(){
   const body=await r.json();
   tuningMessage.textContent=r.ok?'Tracked leg and frame rotation applied. Fixed pose-filter settings were preserved.':('Camera setup rejected: '+(body.error||'unknown error'));
   if(r.ok) loadTuning(body);
-}
-function poseSettingsPayload(){
-  return {confidence_threshold:Number(confidenceThreshold.value),landmark_smoothing:Number(landmarkSmoothing.value),angle_smoothing:Number(angleSmoothing.value),min_segment_length:Number(segmentLength.value),max_angle_jump_deg:Number(angleJump.value)};
-}
-async function applyPoseSettings(){
-  const r=await fetch('/api/tuning',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(poseSettingsPayload())});
-  const body=await r.json();
-  posePresetMessage.textContent=r.ok?'Applied for this session. Saved default was not changed.':('Apply failed: '+(body.error||'unknown error'));
-  if(r.ok) loadTuning(body);
-}
-async function savePosePreset(){
-  const r=await fetch('/api/tuning/preset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(poseSettingsPayload())});
-  const body=await r.json();
-  posePresetMessage.textContent=r.ok?('Saved default: '+body.path):('Save failed: '+(body.error||'unknown error'));
-  if(r.ok) poseControlsDirty=false;
 }
 async function refreshImuPorts(){
   const selected=imuPort.value;
@@ -850,15 +755,6 @@ async function refresh(){
     stopRecording.disabled=!rec.active||Boolean(cal.active);
     startGeneralRecording.disabled=Boolean(rec.active)||calibrationBusy;
     stopGeneralRecording.disabled=!rec.active||Boolean(cal.active);
-    const poseLocked=Boolean(rec.active)||calibrationLocked;
-    applyPoseSettingsButton.disabled=poseLocked;
-    savePosePresetButton.disabled=poseLocked;
-    const preset=s.pose_preset||{};
-    if(poseControlsDirty) posePresetMessage.textContent='Unsaved slider changes.';
-    else if(preset.error) posePresetMessage.textContent=preset.error;
-    else if(preset.saved) posePresetMessage.textContent='Saved default loaded: '+preset.path;
-    else if(preset.exists) posePresetMessage.textContent='Session values differ from saved default: '+preset.path;
-    else posePresetMessage.textContent='No saved default yet. Preset path: '+(preset.path||'—');
     const recordingHref=(!rec.active&&rec.download_url)?rec.download_url:(rec.browse_url||'/exports/recordings/');
     recordingPath.href=recordingHref;
     recordingPath.setAttribute('aria-disabled',recordingHref?'false':'true');
@@ -869,7 +765,7 @@ async function refresh(){
     if(!window.tuningLoaded && s.tuning){ loadTuning(s.tuning); window.tuningLoaded=true; }
   } catch(e) { runtime.textContent='UI connection error: '+e; }
 }
-setInterval(refresh,350); setInterval(refreshHistory,700); refresh(); refreshHistory(); resizeVideoShell(); loadOverlayStroke();
+setInterval(refresh,350); setInterval(refreshHistory,700); refresh(); refreshHistory(); resizeVideoShell();
 </script>
 </body>
 </html>

@@ -25,7 +25,7 @@ def test_workflow_has_five_ordered_single_open_primary_steps() -> None:
     assert _PAGE.count("data-focus-panel open") == 1
 
     accordion = _PAGE.split("let accordionSync=false;", 1)[1].split(
-        "function updateSliderLabels", 1
+        "function loadTuning", 1
     )[0]
     assert "if(other!==step) other.open=false" in accordion
     assert "cancel" not in accordion.lower()
@@ -59,28 +59,26 @@ def test_compact_status_and_collapsible_chart_preserve_camera_space() -> None:
     assert "observer.observe(angleChart.parentElement);" in _PAGE
 
 
-def test_five_pose_sliders_live_only_under_advanced_and_defaults_are_unchanged() -> None:
+def test_final_pose_settings_are_read_only_and_camera_setup_remains_adjustable() -> None:
     advanced = _PAGE.split("Advanced / Diagnostics", 1)[1].split("</details>", 1)[0]
-    for slider_id in (
-        "confidenceThreshold",
-        "landmarkSmoothing",
-        "angleSmoothing",
-        "segmentLength",
-        "angleJump",
-    ):
-        assert _PAGE.count(f'id="{slider_id}"') == 1
-        assert f'id="{slider_id}"' in advanced
-    assert _PAGE.count('type="range"') == 6  # Five pose tuning controls plus overlay-only width.
-    assert 'id="applyPoseSettings"' in advanced
-    assert 'id="savePosePreset"' in advanced
-    assert "fetch('/api/tuning/preset'" in _PAGE
+    for slider_id in ("confidenceThreshold", "landmarkSmoothing", "angleSmoothing",
+                      "segmentLength", "angleJump", "overlayStroke"):
+        assert f'id="{slider_id}"' not in _PAGE
+    assert 'type="range"' not in _PAGE
+    assert 'id="applyPoseSettings"' not in advanced
+    assert 'id="savePosePreset"' not in advanced
+    assert "confidence 0.29" in advanced
+    assert "landmark smoothing 0.30" in advanced
+    assert "angle smoothing 0.70" in advanced
+    assert "minimum segment 0.025" in advanced
+    assert "maximum jump 45°" in advanced
     assert "const payload={leg_side:legSide.value,frame_rotation:frameRotation.value}" in _PAGE
     assert "fetch('/api/tuning'" in _PAGE
 
     defaults = RuntimeTuning()
-    assert defaults.confidence_threshold == 0.30
-    assert defaults.landmark_smoothing == 0.55
-    assert defaults.angle_smoothing == 0.35
+    assert defaults.confidence_threshold == 0.29
+    assert defaults.landmark_smoothing == 0.30
+    assert defaults.angle_smoothing == 0.70
     assert defaults.min_segment_length == 0.025
     assert defaults.max_angle_jump_deg == 45.0
     assert defaults.frame_rotation is FrameRotation.COUNTERCLOCKWISE_90
@@ -88,11 +86,9 @@ def test_five_pose_sliders_live_only_under_advanced_and_defaults_are_unchanged()
     changed = RuntimeTuning.from_mapping(
         {"leg_side": "left", "frame_rotation": "none"}, current=defaults
     )
-    assert changed.confidence_threshold == defaults.confidence_threshold
-    assert changed.landmark_smoothing == defaults.landmark_smoothing
-    assert changed.angle_smoothing == defaults.angle_smoothing
-    assert changed.min_segment_length == defaults.min_segment_length
-    assert changed.max_angle_jump_deg == defaults.max_angle_jump_deg
+    for field in ("confidence_threshold", "landmark_smoothing", "angle_smoothing",
+                  "min_segment_length", "max_angle_jump_deg"):
+        assert getattr(changed, field) == getattr(defaults, field)
 
 
 def test_focused_controls_keep_ids_endpoints_blinding_and_exports() -> None:

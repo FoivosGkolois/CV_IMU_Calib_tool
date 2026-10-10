@@ -120,19 +120,22 @@ class VisionRuntime:
         estimator: PoseEstimator,
         *,
         leg_side: LegSide = LegSide.RIGHT,
-        confidence_threshold: float = 0.30,
+        confidence_threshold: float = 0.29,
         recording_root: str | Path = "video_recordings",
         calibration_root: str | Path = "calibration_suggestions",
         imu_source: Any | None = None,
         imu_source_factory: Any = SerialImuSource,
         imu_filter: KneeAngleFilterMirror | None = None,
         imu_filter_config_path: str | Path | None = None,
+        pose_filters_locked: bool = False,
     ) -> None:
         self.camera = camera
         self.estimator = estimator
+        self._pose_filters_locked = bool(pose_filters_locked)
         self._tuning = RuntimeTuning(
             leg_side=leg_side,
-            confidence_threshold=float(confidence_threshold),
+            confidence_threshold=(RuntimeTuning().confidence_threshold
+                                  if self._pose_filters_locked else float(confidence_threshold)),
         )
         self.recording_root = Path(recording_root).expanduser().resolve()
         self.calibration_root = Path(calibration_root).expanduser().resolve()
@@ -142,7 +145,9 @@ class VisionRuntime:
         self._pose_preset_error = ""
         self._pose_preset_loaded = False
         self._saved_pose_tuning: dict[str, float] | None = None
-        self._load_pose_preset()
+        # Scientific release: old mutable presets must not replace the selected values.
+        if not self._pose_filters_locked:
+            self._load_pose_preset()
         self.recorder = AnnotatedVideoRecorder(self.recording_root)
         self.calibration = CalibrationWorkflow(self.calibration_root)
         restored_setup = self.calibration.setup_metadata()
@@ -175,7 +180,7 @@ class VisionRuntime:
         self._imu_thread: threading.Thread | None = None
         self._latest_jpeg: bytes | None = None
         self._frame_sequence = 0
-        self._overlay_stroke_scale = 1.0  # Session-only visual preference; never affects pose data.
+        self._overlay_stroke_scale = 0.70  # Fixed default; joint markers remain unchanged.
         self._pose_error = ""
         self._reset_tracking_event = threading.Event()
         self._camera_profile = self._infer_camera_profile()
@@ -278,6 +283,7 @@ class VisionRuntime:
             "path": str(self._pose_preset_path),
             "exists": self._pose_preset_path.is_file(),
             "loaded": loaded,
+            "locked": self._pose_filters_locked,
             "saved": saved is not None and saved == current,
             "error": error,
         }
@@ -285,6 +291,8 @@ class VisionRuntime:
     def save_tuning_preset(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         if not isinstance(payload, Mapping):
             raise ValueError("Expected a JSON object")
+        if self._pose_filters_locked:
+            raise ValueError("Pose filter values are fixed in the final UNO Q application")
         if not set(POSE_PRESET_FIELDS).issubset(payload):
             raise ValueError("All five pose settings are required")
         self.update_tuning({name: payload[name] for name in POSE_PRESET_FIELDS})
@@ -425,6 +433,8 @@ class VisionRuntime:
             raise ValueError("Overlay stroke scale must be numeric") from exc
         if not math.isfinite(scale) or not 0.4 <= scale <= 1.2:
             raise ValueError("Overlay stroke scale must be between 0.4 and 1.2")
+        if self._pose_filters_locked:
+            raise ValueError("Overlay line/arc width is fixed at 70% in the final UNO Q application")
         with self._lock:
             self._overlay_stroke_scale = scale
         return {"stroke_scale": scale}
@@ -738,6 +748,8 @@ class VisionRuntime:
         }
 
     def update_camera_profile(self, profile_name: str) -> dict[str, Any]:
+        if self._reference_busy():
+            raise RuntimeError("Finish the goniometer capture before changing camera profile")
         if self._calibration_locked():
             raise RuntimeError("Stop the calibration test before changing the camera profile")
         if self.recorder.status().active:
@@ -1029,6 +1041,11 @@ class VisionRuntime:
                 raise RuntimeError("Stop recording before changing pose settings")
             with self._lock:
                 updated = RuntimeTuning.from_mapping(payload, current=self._tuning)
+                if self._pose_filters_locked and any(
+                    getattr(updated, field) != getattr(self._tuning, field)
+                    for field in POSE_PRESET_FIELDS
+                ):
+                    raise ValueError("Pose filter values are fixed in the final UNO Q application")
                 changed = updated != self._tuning
                 if changed:
                     self._positioning.reset("Pose tuning changed; repeat tracking check")
