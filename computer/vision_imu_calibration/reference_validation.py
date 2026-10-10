@@ -24,6 +24,89 @@ from zipfile import BadZipFile, ZipFile
 
 REQUIRED_COLUMNS = ("trial_id", "reference_angle_deg", "recording_zip")
 ANGLE_COLUMNS = ("raw_knee_angle_deg", "visual_knee_angle_deg")
+GONIOMETER_TARGETS = (90, 120, 150, 175)
+
+
+def measured_reference(value: object) -> float:
+    """Targets are prompts; only the operator's finite measurement is a reference."""
+    if isinstance(value, bool):
+        raise ValueError("Reference angle must be numeric in 0..180")
+    reference = _finite_number(value, "reference_angle_deg")
+    if not 0 <= reference <= 180:
+        raise ValueError("Reference angle must be in 0..180")
+    return reference
+
+
+def evaluate_static_samples(samples: list[dict], *, start_ns: int | None = None,
+                            end_ns: int | None = None) -> dict:
+    """Validate existing synchronized observations, without filtering/inference.
+
+    A 3 s capture needs >=15 frames spanning >=2 s; gaps >0.75 s or any
+    dropout fail. Raw angle range >3 deg or raw point range >2% of the frame
+    fails a stationary hold. Conservative lab defaults, not accuracy claims.
+    """
+    reason = ""
+    valid = [s for s in samples if s.get("valid") is True]
+    if len(valid) != len(samples):
+        reason = "Pose dropout / low confidence / point outside safe area"
+    if len(valid) < 15:
+        reason = reason or "Too few valid frames (need 15); retry"
+    times = [s["host_monotonic_ns"] / 1e9 for s in samples]
+    if not times or times[-1] - times[0] < 2:
+        reason = reason or "Hold too short / camera interrupted; retry"
+    if any(not 0 < b - a <= 0.75 for a, b in zip(times, times[1:])):
+        reason = reason or "Camera sample gap; retry"
+    if times and ((start_ns is not None and not 0 <= times[0] - start_ns / 1e9 <= 0.75)
+                  or (end_ns is not None and not 0 <= end_ns / 1e9 - times[-1] <= 0.75)):
+        reason = reason or "Camera samples missing at start/end of hold; retry"
+    if len({s.get("tracked_leg") for s in valid}) > 1:
+        reason = reason or "Tracked leg changed; retry"
+    for key in ANGLE_COLUMNS:
+        values = [s.get(key) for s in valid]
+        if any(v is None or not math.isfinite(v) or not 0 <= v <= 180 for v in values):
+            reason = reason or "Missing / nonfinite angle; retry"
+        elif values and max(values) - min(values) > 3:
+            reason = reason or "Moving hold (angle changed >3 deg); retry"
+    for key in ("hip_x", "hip_y", "knee_x", "knee_y", "ankle_x", "ankle_y"):
+        values = [s.get(key) for s in valid]
+        if any(v is None or not math.isfinite(v) for v in values):
+            reason = reason or "Missing / nonfinite landmark; retry"
+        elif values and max(values) - min(values) > 0.02:
+            reason = reason or "Moving hold (landmark moved >2% of frame); retry"
+    return {"accepted": not reason, "reason": reason, "frames_total": len(samples),
+            "frames_valid": len(valid), "coverage": len(valid) / len(samples) if samples else 0.0}
+
+
+def guided_capture_report(path: Path, inputs: dict, samples: list[dict]) -> dict:
+    reference = measured_reference(inputs.get("reference_angle_deg"))
+    hold = evaluate_static_samples(samples, start_ns=inputs.get("hold_start_host_monotonic_ns"),
+                                   end_ns=inputs.get("hold_end_host_monotonic_ns"))
+    metrics = evaluate_recording(path, reference_angle_deg=reference, trim_seconds=0,
+                                 min_valid_frames=15)
+    if not metrics["sufficient_data"] or metrics["valid_tracking_fraction"] != 1:
+        hold.update(accepted=False, reason=hold["reason"] or "Recording has missing / invalid frames")
+    if metrics["frames_total"] != len(samples):
+        hold.update(accepted=False, reason="Recording/sample coverage mismatch; retry")
+    return {"schema_version": 1, **inputs, "recording_zip": path.name,
+            "angle_convention": "180 deg straight; smaller means increased flexion",
+            "status": "Measured" if hold["accepted"] else "Needs retry",
+            "hold": hold, "metrics": metrics, "samples": samples,
+            "interpretation": "Independent static 2-D comparison; no correction or accuracy certification"}
+
+
+def guided_repeatability(captures: list[dict]) -> list[dict]:
+    """Per prompt; reference differences remain visible in error repeatability."""
+    result = []
+    for target in GONIOMETER_TARGETS:
+        rows = [r for r in captures if r.get("target_deg") == target and r.get("status") == "Measured"]
+        point = {"target_deg": target, "accepted_captures": len(rows)}
+        for key in ("raw", "filtered"):
+            means = [r["metrics"][key]["mean_deg"] for r in rows]
+            errors = [r["metrics"][key]["bias_deg"] for r in rows]
+            point[key] = {"mean_sd_deg": statistics.stdev(means) if len(means) > 1 else None,
+                          "signed_error_sd_deg": statistics.stdev(errors) if len(errors) > 1 else None}
+        result.append(point)
+    return result
 
 
 def _finite_number(value: str | None, name: str) -> float:
@@ -67,6 +150,7 @@ def evaluate_recording(
     min_valid_frames: int = 5,
 ) -> dict[str, object]:
     """Analyze one stationary hold; do not infer a reference from the vision signal."""
+    reference_angle_deg = measured_reference(reference_angle_deg)
     if not path.is_file():
         raise FileNotFoundError(f"Recording ZIP not found: {path}")
     try:

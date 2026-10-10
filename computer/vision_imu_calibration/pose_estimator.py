@@ -74,7 +74,7 @@ class CropRegion:
 
 
 class MoveNetThunderPoseEstimator:
-    """MoveNet SinglePose Thunder FP16 backend using the LiteRT interpreter.
+    """MoveNet SinglePose FP16 backend using the LiteRT interpreter.
 
     The backend follows Google's video reference pipeline: the first frame uses a
     full-image square crop and subsequent frames use a crop inferred from the
@@ -91,6 +91,7 @@ class MoveNetThunderPoseEstimator:
         *,
         num_threads: int = 4,
         smart_crop: bool = True,
+        model_variant: str = "thunder",
         interpreter_factory: Callable[..., Any] | None = None,
     ) -> None:
         self.model_path = Path(model_path).expanduser().resolve()
@@ -102,6 +103,10 @@ class MoveNetThunderPoseEstimator:
         if int(num_threads) < 1:
             raise ValueError("num_threads must be at least 1")
         self.num_threads = int(num_threads)
+        if model_variant not in ("thunder", "lightning"):
+            raise ValueError("model_variant must be thunder or lightning")
+        self.model_variant = model_variant
+        self.INPUT_SIZE = 192 if model_variant == "lightning" else 256
         self.smart_crop = bool(smart_crop)
         self._interpreter_factory = interpreter_factory
         self._interpreter: Any | None = None
@@ -113,7 +118,7 @@ class MoveNetThunderPoseEstimator:
     @property
     def description(self) -> str:
         crop = "smart-crop" if self.smart_crop else "full-frame"
-        return f"MoveNet SinglePose Thunder FP16 ({crop}, {self.num_threads} threads)"
+        return f"MoveNet SinglePose {self.model_variant.title()} FP16 ({crop}, {self.num_threads} threads)"
 
     def open(self) -> None:
         factory = self._interpreter_factory or _load_litert_interpreter()

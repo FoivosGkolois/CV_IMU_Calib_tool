@@ -24,15 +24,15 @@ _PAGE = r'''<!doctype html>
 * { box-sizing:border-box; }
 html { min-width:320px; }
 body { margin:0; background:var(--bg); color:var(--text); overflow-x:hidden; }
-main { display:grid; grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) minmax(300px,.8fr); gap:12px; padding:12px; width:100%; margin:0; align-items:start; }
+main { display:grid; grid-template-columns:minmax(0,58fr) minmax(380px,42fr); gap:14px; padding:12px; width:100%; margin:0; align-items:start; }
+.visual-column { position:sticky; top:12px; min-width:0; width:100%; max-height:calc(100vh - 24px); display:grid; gap:10px; overflow:auto; }
 .camera-column { min-width:0; width:100%; display:flex; justify-content:stretch; align-items:flex-start; }
-.live-column { min-width:0; display:grid; grid-template-rows:auto auto; align-content:start; gap:10px; }
-.video-shell { background:#05070b; border:1px solid var(--line); border-radius:14px; overflow:hidden; width:100%; min-width:0; aspect-ratio:16 / 9; align-self:start; display:flex; align-items:center; justify-content:center; }
+.video-shell { background:#05070b; border:1px solid var(--line); border-radius:14px; overflow:hidden; width:100%; min-width:0; max-height:88vh; aspect-ratio:16 / 9; align-self:start; display:flex; align-items:center; justify-content:center; }
 .video-shell img { width:100%; height:100%; object-fit:contain; display:block; }
-.live-summary { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; align-items:start; }
+.live-summary { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:7px; align-items:stretch; }
 .summary-card, .card, .chart-card { background:var(--surface); border:1px solid var(--line); border-radius:12px; }
-.summary-card { padding:10px 12px; min-width:0; max-width:100%; overflow:visible; }
-.summary-card .value { font-size:clamp(16px,1.4vw,21px); }
+.summary-card { padding:9px 10px; min-width:0; max-width:100%; overflow:visible; }
+.summary-card .value { font-size:clamp(14px,1.2vw,19px); }
 .control-panel { min-width:0; display:grid; gap:10px; }
 .card { padding:12px; min-width:0; max-width:100%; overflow:visible; }
 .card.priority { border-color:#365374; box-shadow:0 0 0 1px rgba(57,160,255,.08); }
@@ -40,18 +40,28 @@ main { display:grid; grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) minmax(
 .card summary::-webkit-details-marker { display:none; }
 .card summary::after { content:"▾"; color:var(--muted); font-size:12px; }
 .card:not([open]) summary::after { transform:rotate(-90deg); }
-.label { color:var(--muted); font-size:10px; letter-spacing:.1em; text-transform:uppercase; }
+.label { color:var(--muted); font-size:12px; letter-spacing:.08em; text-transform:uppercase; }
 .value { margin-top:5px; font-size:20px; font-weight:700; line-height:1.15; }
 .ok { color:var(--green); } .bad { color:var(--red); } .rec { color:#ff7b7b; }
-.small { font-size:12px; color:#d8e3f4; overflow-wrap:anywhere; }
-.note { color:var(--muted); font-size:10.5px; line-height:1.4; margin-top:7px; overflow-wrap:anywhere; }
+.small { font-size:13px; color:#d8e3f4; overflow-wrap:anywhere; }
+.note { color:var(--muted); font-size:13px; line-height:1.45; margin-top:7px; overflow-wrap:anywhere; }
+.workflow-step { padding:0; }
+.workflow-step > summary, .auxiliary-panel > summary { min-height:44px; padding:8px 12px; }
+.workflow-step[open] > summary { border-bottom:1px solid var(--line); background:#132033; border-radius:12px 12px 0 0; }
+.step-heading { display:flex; align-items:center; gap:10px; min-width:0; }
+.step-number { display:grid; place-items:center; width:24px; height:24px; flex:0 0 auto; border-radius:50%; background:#1a2b42; color:#a9d6ff; font-weight:800; font-size:12px; }
+.step-title { color:var(--text); font-size:14px; font-weight:750; letter-spacing:.01em; }
+.step-status { margin-left:auto; color:var(--muted); font-size:11px; letter-spacing:.06em; text-transform:uppercase; white-space:nowrap; }
+.step-content { padding:14px; }
+.step-content > :first-child { margin-top:0; }
 .controls { display:grid; gap:12px; margin-top:10px; }
 .control-row { display:grid; gap:5px; }
-.control-head { display:flex; justify-content:space-between; gap:10px; font-size:12px; color:#c9d5e7; }
-.control-help { color:#8fa3bd; font-size:10px; line-height:1.35; }
+.control-head { display:flex; justify-content:space-between; gap:10px; font-size:14px; color:#c9d5e7; }
+.control-help { color:#8fa3bd; font-size:13px; line-height:1.4; }
 .control-help b { color:#c9d5e7; font-weight:650; }
 input[type=range] { width:100%; accent-color:var(--blue); }
-select, button { width:100%; min-width:0; height:36px; border:1px solid #354764; border-radius:9px; background:var(--surface-2); color:var(--text); padding:0 10px; font:inherit; font-size:12px; }
+select, button, input[type=text], input[type=number], input:not([type]), textarea { width:100%; min-width:0; min-height:38px; border:1px solid #354764; border-radius:9px; background:var(--surface-2); color:var(--text); padding:7px 10px; font:inherit; font-size:14px; }
+textarea { resize:vertical; }
 button { cursor:pointer; font-weight:700; }
 button.primary { background:#1767b2; border-color:#2789de; }
 button.record { background:#8d2028; border-color:#d3414d; }
@@ -61,196 +71,209 @@ button:disabled { opacity:.45; cursor:not-allowed; }
 .button-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-top:9px; }
 .inline-grid { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:7px; align-items:center; margin-top:8px; }
 .inline-grid button { width:auto; min-width:78px; }
-.path-link { display:block; width:100%; height:auto; min-height:34px; margin-top:8px; padding:7px 9px; text-align:left; text-decoration:none; white-space:normal; line-height:1.3; font-weight:600; font-size:12px; color:#a9d6ff; background:#0b1726; border:1px dashed #354764; border-radius:9px; overflow-wrap:anywhere; }
+.path-link { display:block; width:100%; height:auto; min-height:36px; margin-top:8px; padding:8px 10px; text-align:left; text-decoration:none; white-space:normal; line-height:1.3; font-weight:600; font-size:13px; color:#a9d6ff; background:#0b1726; border:1px dashed #354764; border-radius:9px; overflow-wrap:anywhere; }
 .path-link:hover { border-color:var(--blue); background:#10243b; }
 .path-link[aria-disabled="true"] { opacity:.45; pointer-events:none; }
 .metric-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; margin-top:8px; }
 .metric { background:var(--surface-2); border:1px solid #2a3952; border-radius:9px; padding:8px; min-width:0; }
 .metric .name { color:var(--muted); font-size:9px; text-transform:uppercase; letter-spacing:.07em; }
 .metric .number { margin-top:4px; font-size:16px; font-weight:700; overflow-wrap:anywhere; }
-.chart-card { padding:12px; height:clamp(230px,32vh,360px); min-width:0; max-width:100%; overflow:hidden; }
-.recommendation-card { padding:11px 12px; min-width:0; }
-.recommendation-values { margin-top:6px; color:#d8e3f4; font-size:11px; line-height:1.5; overflow-wrap:anywhere; }
-.chart-shell { height:calc(100% - 48px); min-height:140px; margin-top:8px; }
+.chart-card { padding:0; min-width:0; max-width:100%; overflow:hidden; }
+.chart-card > summary { padding:10px 12px; }
+.chart-content { height:clamp(210px,30vh,320px); padding:0 12px 12px; }
+.recommendation-card { padding:11px 12px; min-width:0; margin-top:10px; }
+.recommendation-values { margin-top:6px; color:#d8e3f4; font-size:13px; line-height:1.5; overflow-wrap:anywhere; }
+.chart-shell { height:calc(100% - 50px); min-height:140px; margin-top:8px; }
 .chart-shell canvas { width:100%; height:100%; display:block; background:#0a101a; border-radius:9px; }
 .calibration-card { border-color:#6f5b25; box-shadow:0 0 0 1px rgba(255,194,77,.10); }
 .calibration-actions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-top:9px; }
 .calibration-actions button { min-height:38px; height:auto; padding:7px 9px; }
 .progress-track { height:8px; margin-top:9px; border-radius:999px; overflow:hidden; background:#0a101a; border:1px solid #2a3952; }
 .progress-fill { height:100%; width:0%; background:#39a0ff; transition:width .25s linear; }
-.modal-backdrop { position:fixed; inset:0; z-index:1000; display:flex; align-items:center; justify-content:center; padding:18px; background:rgba(3,7,12,.86); }
-.modal-backdrop[hidden] { display:none; }
-.modal-card { width:min(560px,100%); background:#111925; border:1px solid #3a4e6c; border-radius:16px; padding:18px; box-shadow:0 24px 80px rgba(0,0,0,.5); }
-.modal-card h2 { margin:0 0 10px; font-size:20px; }
-.modal-card ol { margin:10px 0 14px 22px; padding:0; color:#d8e3f4; line-height:1.55; font-size:13px; }
+.inline-guidance { margin-top:12px; background:#0b1421; border:1px solid #3a4e6c; border-radius:12px; padding:14px; }
+.inline-guidance[hidden] { display:none; }
+.inline-guidance h2 { margin:0 0 10px; font-size:18px; }
+.inline-guidance ol { margin:10px 0 14px 22px; padding:0; color:#d8e3f4; line-height:1.55; font-size:13px; }
 .countdown { min-height:52px; display:flex; align-items:center; justify-content:center; font-size:42px; font-weight:800; color:#ffcc66; }
 .modal-buttons { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.readiness-strip { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 12px; border-color:#365374; }
+.readiness-strip .value { margin:0; font-size:13px; }
+.results-links { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+.results-links .path-link { margin-top:0; }
 footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size:10px; }
-@media (max-width:1280px) {
-  main { grid-template-columns:minmax(0,1.1fr) minmax(0,1fr); }
-  .control-panel { grid-column:1 / -1; grid-template-columns:repeat(2,minmax(0,1fr)); }
-  .control-panel > .wide { grid-column:1 / -1; }
+@media (max-width:1100px) {
+  main { grid-template-columns:1fr; }
+  .visual-column { position:static; max-height:none; overflow:visible; }
+  .video-shell { max-height:82vh; }
 }
-@media (max-width:860px) {
+@media (max-width:760px) {
   main { grid-template-columns:1fr; padding:10px; gap:10px; }
-  .camera-column { justify-content:flex-start; }
-  .live-column { grid-template-rows:auto auto; }
-  .control-panel { grid-template-columns:1fr; }
   .live-summary { grid-template-columns:repeat(2,minmax(0,1fr)); }
-  .chart-card { width:100%; height:250px; }
-  .chart-shell { height:calc(100% - 48px); }
+  .chart-content { height:250px; }
   .button-grid { grid-template-columns:1fr 1fr; }
+  .results-links { grid-template-columns:1fr; }
 }
 @media (max-width:440px) {
   .live-summary { grid-template-columns:1fr; }
   .button-grid { grid-template-columns:1fr; }
+  .modal-buttons { grid-template-columns:1fr; }
 }
 </style>
 </head>
 <body>
 <main>
-<section class="camera-column">
-  <div id="videoShell" class="video-shell"><img id="videoStream" src="/video.mjpg" alt="Live camera stream"></div>
-</section>
-<section class="live-column">
+<section class="visual-column" aria-label="Live camera and essential status">
+  <div class="camera-column">
+    <div id="videoShell" class="video-shell"><img id="videoStream" src="/video.mjpg" alt="Live camera stream"></div>
+  </div>
   <div class="live-summary">
     <div class="summary-card"><div class="label">Tracking</div><div id="tracking" class="value">Starting…</div><div id="reason" class="small">Initializing camera and pose model</div></div>
     <div class="summary-card"><div class="label">Visual angle</div><div id="angle" class="value">--.-°</div><div id="rawAngle" class="small">Raw: --.-°</div></div>
     <div class="summary-card"><div class="label">IMU angle</div><div id="imuAngle" class="value">--.-°</div><div id="imuEstimatorState" class="small">NO SAMPLE</div></div>
     <div class="summary-card"><div class="label">Pose quality</div><div id="confidence" class="value">0.00</div><div id="fps" class="small">0.0 FPS</div></div>
   </div>
-  <div class="chart-card">
-    <div class="label">Live posterior knee-angle presentation · last 15 s</div>
-    <div class="note">Blue: visual reference · Green: IMU estimate. Live display only; calibration scoring runs offline after both stages.</div>
-    <div class="chart-shell"><canvas id="angleChart"></canvas></div>
-  </div>
-  <div class="recommendation-card card">
-    <div class="label">Recommended IMU filter settings</div>
-    <div id="imuRecommendationState" class="note">Complete both stages of one calibration run to generate data-driven settings.</div>
-    <div id="imuRecommendationValues" class="recommendation-values"></div>
-  </div>
+  <details class="chart-card">
+    <summary><span class="label">Live angle chart · last 15 s</span></summary>
+    <div class="chart-content">
+      <div class="note">Blue: visual reference · Green: IMU estimate. Calibration scoring runs offline.</div>
+      <div class="chart-shell"><canvas id="angleChart"></canvas></div>
+    </div>
+  </details>
 </section>
 <aside class="control-panel">
-  <div class="card priority wide calibration-card">
-    <div class="label">Guided IMU filter calibration</div>
-    <div id="calibrationState" class="value small">READY</div>
-    <div id="calibrationMessage" class="note">Start calibration with the static stage, then continue to the dynamic stage.</div>
-    <div class="progress-track"><div id="calibrationProgress" class="progress-fill"></div></div>
-    <div class="calibration-actions">
-      <button id="startStaticTest" class="primary" onclick="showCalibrationInstructions('static')">Start calibration</button>
-      <button id="startDynamicTest" class="primary" onclick="showCalibrationInstructions('dynamic')">Continue to dynamic calibration</button>
-      <button id="stopCalibrationTest" class="stop" onclick="stopCalibrationTest()">Stop current test</button>
-      <button id="cancelCalibrationTest" class="secondary" onclick="cancelCalibrationTest()">Cancel test</button>
-    </div>
-    <a id="calibrationPath" class="path-link" href="/exports/calibration/" target="_blank" rel="noopener">Calibration files will be exported to calibration_suggestions.</a>
-  </div>
+  <div class="card readiness-strip"><span class="label">IMU readiness</span><span id="imuReadySummary" class="value small">NOT READY</span></div>
 
-  <div class="card priority wide">
-    <div class="label">Recording</div>
-    <div id="recording" class="value small">IDLE</div>
-    <div class="button-grid">
-      <button id="startRecording" class="record" onclick="recordStart()">Start recording</button>
-      <button id="stopRecording" class="stop" onclick="recordStop()">Stop</button>
+  <details id="cameraSetupStep" class="card workflow-step" data-workflow-step data-focus-panel open>
+    <summary><span class="step-heading"><span class="step-number">1</span><span class="step-title">Camera Setup</span></span><span id="cameraSetupStepStatus" class="step-status">READY</span></summary>
+    <div class="step-content controls">
+      <div class="control-row"><label class="control-head" for="cameraProfile">Camera profile</label><select id="cameraProfile"><option value="fast">Fast · 640×480</option><option value="quality">Quality · 1280×720</option></select><button id="applyCameraProfile" class="primary" onclick="setCameraProfile()">Apply profile</button><div id="cameraProfileMessage" class="control-help"><b>Fast:</b> lower load. <b>Quality:</b> more detail at difficult angles.</div></div>
+      <div class="control-row"><label class="control-head" for="legSide">Tracked leg</label><select id="legSide"><option value="auto">Auto</option><option value="left">Left</option><option value="right">Right</option></select><div class="control-help"><b>Auto:</b> highest-confidence leg. <b>Left/Right:</b> locks the corrected user-facing side.</div></div>
+      <div class="control-row"><label class="control-head" for="frameRotation">Frame rotation</label><select id="frameRotation"><option value="counterclockwise_90" selected>90° counter-clockwise</option><option value="none">0°</option><option value="clockwise_90">90° clockwise</option><option value="rotate_180">180°</option></select><div class="control-help">Default for the current portrait camera mounting.</div></div>
+      <button id="applyCameraSetup" class="primary" onclick="applyCameraSetup()">Apply leg and rotation</button>
+      <div id="tuningMessage" class="note">Advanced pose settings remain active and can be reviewed below.</div>
     </div>
-    <a id="recordingPath" class="path-link" href="/exports/recordings/" target="_blank" rel="noopener">Video recordings are finalized as ZIP files inside video_recordings.</a>
-  </div>
-
-  <div class="card wide">
-    <div class="label">Raw IMU source</div>
-    <div id="imuState" class="value small">DISCONNECTED</div>
-    <div id="imuSerialControls">
-      <div class="inline-grid"><select id="imuPort"><option value="">Select COM port</option></select><button class="secondary" onclick="refreshImuPorts()">Refresh</button></div>
-      <div class="button-grid"><button id="imuConnect" class="primary" onclick="connectImu()">Connect</button><button id="imuDisconnect" class="stop" onclick="disconnectImu()">Disconnect</button></div>
-    </div>
-    <div id="imuMessage" class="note">Continuous 100 Hz acquisition; recording decides whether samples enter the final ZIP.</div>
-    <div id="imuRate" class="note">Rate: 0.0 Hz · Port: —</div>
-    <div id="imuSensors" class="note">Thigh: NOT READY · Shank: NOT READY</div>
-    <div id="imuHealth" class="note">Samples: 0 · Gaps: 0 · Parse errors: 0 · Queue drops: 0</div>
-  </div>
-
-  <div class="card">
-    <div class="label">Camera profile</div>
-    <select id="cameraProfile" style="margin-top:8px"><option value="fast">Fast · 640×480</option><option value="quality">Quality · 1280×720</option></select>
-    <button id="applyCameraProfile" class="primary" style="margin-top:8px" onclick="setCameraProfile()">Apply profile</button>
-    <div id="cameraProfileMessage" class="note"><b>Fast:</b> lower load. <b>Quality:</b> more detail at difficult angles.</div>
-  </div>
-
-  <details class="card" open>
-    <summary><span class="label">IMU estimator details</span></summary>
-    <div class="metric-grid">
-      <div class="metric"><div class="name">Visual − IMU</div><div id="angleDifference" class="number">--.-°</div></div>
-      <div class="metric"><div class="name">Knee speed</div><div id="imuSpeed" class="number">--.-°/s</div></div>
-      <div class="metric"><div class="name">Thigh / Shank</div><div id="segmentAngles" class="number">--.- / --.-°</div></div>
-      <div class="metric"><div class="name">State</div><div class="number">Live</div></div>
-    </div>
-    <button id="reloadImuFilter" class="secondary" style="margin-top:8px" onclick="reloadFilterConfig()">Reload IMU filter config</button>
-    <div id="imuFilterInfo" class="note">Waiting for synchronized raw IMU samples.</div>
   </details>
 
-  <details class="card wide">
-    <summary><span class="label">Pose-reference tuning</span></summary>
-    <div class="controls">
-      <div class="control-row">
-        <div class="control-head"><span>Tracked leg</span></div>
-        <select id="legSide"><option value="auto">Auto</option><option value="left">Left</option><option value="right">Right</option></select>
-        <div class="control-help"><b>Auto:</b> highest-confidence leg. <b>Left/Right:</b> locks the corrected user-facing side.</div>
-      </div>
-      <div class="control-row">
-        <div class="control-head"><span>Frame rotation</span></div>
-        <select id="frameRotation"><option value="counterclockwise_90" selected>90° counter-clockwise</option><option value="none">0°</option><option value="clockwise_90">90° clockwise</option><option value="rotate_180">180°</option></select>
-        <div class="control-help">Default for the current portrait camera mounting.</div>
-      </div>
-      <div class="control-row"><div class="control-head"><span>Acceptance confidence</span><span id="confidenceThresholdValue">0.30</span></div><input id="confidenceThreshold" type="range" min="0.05" max="0.99" step="0.01"><div class="control-help">Higher values reject uncertain frames more aggressively.</div></div>
-      <div class="control-row"><div class="control-head"><span>Landmark smoothing</span><span id="landmarkSmoothingValue">0.55</span></div><input id="landmarkSmoothing" type="range" min="0" max="0.95" step="0.01"><div class="control-help">More smoothing reduces jitter but adds lag.</div></div>
-      <div class="control-row"><div class="control-head"><span>Angle smoothing</span><span id="angleSmoothingValue">0.35</span></div><input id="angleSmoothing" type="range" min="0" max="0.95" step="0.01"><div class="control-help">More smoothing stabilizes the angle but slows response.</div></div>
-      <div class="control-row"><div class="control-head"><span>Minimum visible segment</span><span id="segmentLengthValue">0.025</span></div><input id="segmentLength" type="range" min="0.005" max="0.20" step="0.005"><div class="control-help">Rejects implausibly short thigh/shank projections.</div></div>
-      <div class="control-row"><div class="control-head"><span>Maximum angle jump</span><span id="angleJumpValue">45°</span></div><input id="angleJump" type="range" min="5" max="180" step="1"><div class="control-help">Lower values reject spikes more aggressively.</div></div>
+  <details id="positionStep" class="card workflow-step" data-workflow-step data-focus-panel>
+    <summary><span class="step-heading"><span class="step-number">2</span><span class="step-title">Check Tracking</span></span><span id="positionStepStatus" class="step-status">IDLE</span></summary>
+    <div class="step-content">
+      <div class="note">Stand side-on and keep the full hip–knee–ankle chain inside the frame. The 2-D model cannot prove side-on orientation.</div>
+      <button id="checkTracking" class="primary" onclick="positionAction('check')">Check Tracking</button>
+      <div class="note">After clicking, slowly bend and straighten the knee. The check uses several seconds of fresh frames and never passes a single static frame.</div>
+      <div id="positionResult" class="note">Ready to check tracking</div>
     </div>
-    <button class="primary" style="margin-top:10px" onclick="applyTuning()">Apply tuning</button>
-    <div id="tuningMessage" class="note">Application-level filtering only; model weights are unchanged.</div>
   </details>
 
-  <details class="card wide">
-    <summary><span class="label">Runtime diagnostics</span></summary>
-    <div id="runtime" class="value small">STARTING</div>
-    <div id="backend" class="note">Backend: MoveNet Thunder</div>
-    <div id="source" class="note">Source: —</div>
-    <div id="frameCount" class="note">Frames: 0</div>
+  <details id="referencePanel" class="card auxiliary-panel" data-focus-panel>
+    <summary><span class="step-heading"><span class="step-title">Goniometer / Static Vision Check</span></span><span id="referenceStepStatus" class="step-status">OPTIONAL</span></summary>
+    <div class="step-content controls">
+      <div class="note">Use this partial static validation at several angles when available. Enter the measured posterior angle before the AI value is revealed.</div>
+      <div class="note">Goniometer placement and reading have measurement uncertainty. Results report static agreement/error only; they do not establish perfect dynamic ground truth, auto-correct pose, or tune Bayesian/vision settings.</div>
+      <label class="small" for="referenceSetup">Setup: subject ID, camera mounting/distance, floor mark/chair and goniometer</label>
+      <textarea id="referenceSetup" rows="3" maxlength="2000"></textarea>
+      <label class="small" for="referenceTarget">Target prompt</label>
+      <select id="referenceTarget"><option value="90">~90 degrees</option><option value="120">~120 degrees</option><option value="150">~150 degrees</option><option value="175">Near straight (~175 degrees)</option></select>
+      <button id="referenceBegin" onclick="referenceAction('begin')">New / repeat point (hide AI value)</button>
+      <label class="small" for="referenceMeasured">Actual measured goniometer angle (0..180; 180 = straight)</label>
+      <input id="referenceMeasured" type="number" min="0" max="180" step="any" disabled>
+      <div class="button-grid"><button id="referenceConfirm" onclick="referenceAction('confirm')" disabled>Confirm manual value</button><button id="referenceCapture" onclick="referenceAction('capture')" disabled>Capture 3-second hold</button></div>
+      <button id="referenceClose" class="secondary" onclick="referenceAction('cancel')">Close validation</button>
+      <div id="referenceState" class="note">Optional laboratory validation</div>
+      <div id="referenceResults" class="small" style="white-space:pre-wrap"></div>
+      <label class="small" for="savedReference">Saved accepted capture (reusable across equivalent sessions)</label>
+      <select id="savedReference"></select>
+      <div id="savedSetup" class="note"></div>
+      <label class="small"><input id="unchangedSetup" type="checkbox"> I confirm unchanged physical camera/subject setup and positioning.</label>
+      <button id="referenceReuse" onclick="referenceAction('reuse')">Use saved comparison</button>
+    </div>
+  </details>
+
+  <details id="calibrationStep" class="card workflow-step calibration-card" data-workflow-step data-focus-panel>
+    <summary><span class="step-heading"><span class="step-number">3</span><span class="step-title">IMU Calibration + Bayesian</span></span><span id="calibrationStepStatus" class="step-status">IDLE</span></summary>
+    <div class="step-content">
+      <div id="calibrationState" class="value small">READY</div>
+      <div id="calibrationMessage" class="note">Start calibration with the static stage, then continue to the dynamic stage.</div>
+      <div class="progress-track"><div id="calibrationProgress" class="progress-fill"></div></div>
+      <div id="sessionSetupId" class="note">A session/setup ID will be generated automatically at static calibration.</div>
+      <div class="calibration-actions"><button id="startStaticTest" class="primary" onclick="showCalibrationInstructions('static')">Start calibration</button><button id="startDynamicTest" class="primary" onclick="showCalibrationInstructions('dynamic')">Continue to dynamic calibration</button><button id="stopCalibrationTest" class="stop" onclick="stopCalibrationTest()">Stop current test</button><button id="cancelCalibrationTest" class="secondary" onclick="cancelCalibrationTest()">Cancel test</button></div>
+      <div id="calibrationModal" class="inline-guidance" hidden>
+        <h2 id="calibrationModalTitle">Calibration test</h2><div id="calibrationModalIntro" class="note"></div><ol id="calibrationInstructions"></ol><div id="calibrationCountdown" class="countdown">Ready</div>
+        <div class="modal-buttons"><button id="beginCalibrationCountdown" class="primary" onclick="beginCalibrationCountdown()">Start 5-second countdown</button><button id="closeCalibrationModal" class="secondary" onclick="closeCalibrationModal()">Back</button></div>
+      </div>
+    </div>
+  </details>
+
+  <details id="validationStep" class="card workflow-step" data-workflow-step data-focus-panel>
+    <summary><span class="step-heading"><span class="step-number">4</span><span class="step-title">Independent Validation</span></span><span id="validationStepStatus" class="step-status">IDLE</span></summary>
+    <div class="step-content">
+      <div id="recording" class="value small">IDLE</div>
+      <div class="note">After Bayesian calibration, record a NEW synchronized camera+IMU flexion–extension trial with the unchanged physical setup.</div>
+      <div class="button-grid"><button id="startRecording" class="record" onclick="recordStart(true)">Record NEW validation trial</button><button id="stopRecording" class="stop" onclick="recordStop()">Stop recording</button></div>
+      <label class="small"><input id="heldoutUnchangedSetup" type="checkbox"> I confirm unchanged person, IMU mounting, selected leg, camera placement and profile.</label>
+      <button id="validateHeldout" class="primary" onclick="validateHeldout()">Validate finalized NEW trial</button>
+      <div id="heldoutResult" class="note">Validation uses frozen parameters, never retunes, and never applies recommendations automatically.</div>
+    </div>
+  </details>
+
+  <details id="resultsStep" class="card workflow-step" data-workflow-step data-focus-panel>
+    <summary><span class="step-heading"><span class="step-number">5</span><span class="step-title">Results &amp; Exports</span></span><span id="resultsStepStatus" class="step-status">IDLE</span></summary>
+    <div class="step-content">
+      <div class="recommendation-card card"><div class="label">Recommended IMU filter settings</div><div id="imuRecommendationState" class="note">Complete both stages of one calibration run to generate data-driven settings.</div><div id="imuRecommendationValues" class="recommendation-values"></div></div>
+      <div class="results-links"><a id="referenceExport" class="path-link" href="/exports/recordings/" target="_blank" rel="noopener">Open goniometer validation exports</a><a id="recordingPath" class="path-link" href="/exports/recordings/" target="_blank" rel="noopener">Open recording exports</a><a id="calibrationPath" class="path-link" href="/exports/calibration/" target="_blank" rel="noopener">Open calibration exports</a><a id="heldoutPath" class="path-link" href="/exports/calibration/" target="_blank" rel="noopener">Held-out result will be saved with this calibration run.</a></div>
+    </div>
+  </details>
+
+  <details class="card" data-focus-panel>
+    <summary><span class="label">Advanced / Diagnostics</span></summary>
+    <div class="step-content">
+      <div class="label">Pose settings</div>
+      <div class="note">Factory defaults remain unchanged. Session changes invalidate stale calibration reuse.</div>
+      <div class="controls">
+        <div class="control-row"><div class="control-head"><span>Acceptance confidence</span><span id="confidenceThresholdValue">0.30</span></div><input id="confidenceThreshold" type="range" min="0.05" max="0.99" step="0.01"></div>
+        <div class="control-row"><div class="control-head"><span>Landmark smoothing</span><span id="landmarkSmoothingValue">0.55</span></div><input id="landmarkSmoothing" type="range" min="0" max="0.95" step="0.01"></div>
+        <div class="control-row"><div class="control-head"><span>Angle smoothing</span><span id="angleSmoothingValue">0.35</span></div><input id="angleSmoothing" type="range" min="0" max="0.95" step="0.01"></div>
+        <div class="control-row"><div class="control-head"><span>Minimum visible segment</span><span id="segmentLengthValue">0.025</span></div><input id="segmentLength" type="range" min="0.005" max="0.20" step="0.005"></div>
+        <div class="control-row"><div class="control-head"><span>Maximum angle jump</span><span id="angleJumpValue">45°</span></div><input id="angleJump" type="range" min="5" max="180" step="1"></div>
+      </div>
+      <div class="button-grid"><button id="applyPoseSettings" class="secondary" onclick="applyPoseSettings()">Apply for session</button><button id="savePosePreset" class="primary" onclick="savePosePreset()">Save as Default</button></div>
+      <div id="posePresetMessage" class="note">No saved preset status yet.</div>
+      <hr><div class="label">General recording</div><div id="generalRecordingStatus" class="value small">IDLE</div><div class="button-grid"><button id="startGeneralRecording" class="record" onclick="recordStart(false)">Start general recording</button><button id="stopGeneralRecording" class="stop" onclick="recordStop()">Stop recording</button></div>
+      <div class="label">Raw IMU source</div><div id="imuState" class="value small">DISCONNECTED</div>
+      <div id="imuSerialControls"><div class="inline-grid"><select id="imuPort"><option value="">Select COM port</option></select><button class="secondary" onclick="refreshImuPorts()">Refresh</button></div><div class="button-grid"><button id="imuConnect" class="primary" onclick="connectImu()">Connect</button><button id="imuDisconnect" class="stop" onclick="disconnectImu()">Disconnect</button></div></div>
+      <div id="imuMessage" class="note">Continuous 100 Hz acquisition; recording decides whether samples enter the final ZIP.</div><div id="imuRate" class="note">Rate: 0.0 Hz · Port: —</div><div id="imuSensors" class="note">Thigh: NOT READY · Shank: NOT READY</div><div id="imuHealth" class="note">Samples: 0 · Gaps: 0 · Parse errors: 0 · Queue drops: 0</div>
+      <hr><div class="label">IMU estimator</div><div class="metric-grid"><div class="metric"><div class="name">Visual − IMU</div><div id="angleDifference" class="number">--.-°</div></div><div class="metric"><div class="name">Knee speed</div><div id="imuSpeed" class="number">--.-°/s</div></div><div class="metric"><div class="name">Thigh / Shank</div><div id="segmentAngles" class="number">--.- / --.-°</div></div><div class="metric"><div class="name">State</div><div class="number">Live</div></div></div>
+      <button id="reloadImuFilter" class="secondary" style="margin-top:8px" onclick="reloadFilterConfig()">Reload IMU filter config</button><div id="imuFilterInfo" class="note">Waiting for synchronized raw IMU samples.</div>
+      <hr><div class="label">Runtime</div><div id="runtime" class="value small">STARTING</div><div id="backend" class="note">Backend: MoveNet Thunder</div><div id="source" class="note">Source: —</div><div id="frameCount" class="note">Frames: 0</div>
+    </div>
   </details>
 </aside>
 </main>
-<div id="calibrationModal" class="modal-backdrop" hidden>
-  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="calibrationModalTitle">
-    <h2 id="calibrationModalTitle">Calibration test</h2>
-    <div id="calibrationModalIntro" class="note"></div>
-    <ol id="calibrationInstructions"></ol>
-    <div id="calibrationCountdown" class="countdown">Ready</div>
-    <div class="modal-buttons">
-      <button id="beginCalibrationCountdown" class="primary" onclick="beginCalibrationCountdown()">Start 5-second countdown</button>
-      <button id="closeCalibrationModal" class="secondary" onclick="closeCalibrationModal()">Back</button>
-    </div>
-  </div>
-</div>
 <footer>Live acquisition plus one deterministic calibration run with static and dynamic stages. Recommendations are comparative, data-driven settings based on the synchronized visual reference.</footer>
 <script>
-const ids = {
-  confidence_threshold:'confidenceThreshold', landmark_smoothing:'landmarkSmoothing',
-  angle_smoothing:'angleSmoothing', min_segment_length:'segmentLength',
-  max_angle_jump_deg:'angleJump', leg_side:'legSide', frame_rotation:'frameRotation'
-};
+const legSide=document.getElementById('legSide');
+const frameRotation=document.getElementById('frameRotation');
+const tuningMessage=document.getElementById('tuningMessage');
 const confidenceThreshold=document.getElementById('confidenceThreshold');
 const landmarkSmoothing=document.getElementById('landmarkSmoothing');
 const angleSmoothing=document.getElementById('angleSmoothing');
 const segmentLength=document.getElementById('segmentLength');
 const angleJump=document.getElementById('angleJump');
-const legSide=document.getElementById('legSide');
-const frameRotation=document.getElementById('frameRotation');
 const confidenceThresholdValue=document.getElementById('confidenceThresholdValue');
 const landmarkSmoothingValue=document.getElementById('landmarkSmoothingValue');
 const angleSmoothingValue=document.getElementById('angleSmoothingValue');
 const segmentLengthValue=document.getElementById('segmentLengthValue');
 const angleJumpValue=document.getElementById('angleJumpValue');
-const tuningMessage=document.getElementById('tuningMessage');
+const applyPoseSettingsButton=document.getElementById('applyPoseSettings');
+const savePosePresetButton=document.getElementById('savePosePreset');
+const posePresetMessage=document.getElementById('posePresetMessage');
+const imuReadySummary=document.getElementById('imuReadySummary');
+const cameraSetupStepStatus=document.getElementById('cameraSetupStepStatus');
+const positionStepStatus=document.getElementById('positionStepStatus');
+const referenceStepStatus=document.getElementById('referenceStepStatus');
+const calibrationStepStatus=document.getElementById('calibrationStepStatus');
+const validationStepStatus=document.getElementById('validationStepStatus');
+const resultsStepStatus=document.getElementById('resultsStepStatus');
+const checkTrackingButton=document.getElementById('checkTracking');
 const reason=document.getElementById('reason');
 const angle=document.getElementById('angle');
 const rawAngle=document.getElementById('rawAngle');
@@ -272,6 +295,14 @@ const startDynamicTest=document.getElementById('startDynamicTest');
 const stopCalibrationTestButton=document.getElementById('stopCalibrationTest');
 const cancelCalibrationTestButton=document.getElementById('cancelCalibrationTest');
 const calibrationPath=document.getElementById('calibrationPath');
+const sessionSetupId=document.getElementById('sessionSetupId');
+const heldoutUnchangedSetup=document.getElementById('heldoutUnchangedSetup');
+const validateHeldoutButton=document.getElementById('validateHeldout');
+const heldoutResult=document.getElementById('heldoutResult');
+const heldoutPath=document.getElementById('heldoutPath');
+const startGeneralRecording=document.getElementById('startGeneralRecording');
+const stopGeneralRecording=document.getElementById('stopGeneralRecording');
+const generalRecordingStatus=document.getElementById('generalRecordingStatus');
 const calibrationModal=document.getElementById('calibrationModal');
 const calibrationModalTitle=document.getElementById('calibrationModalTitle');
 const calibrationModalIntro=document.getElementById('calibrationModalIntro');
@@ -290,6 +321,7 @@ const imuDisconnect=document.getElementById('imuDisconnect');
 const imuMessage=document.getElementById('imuMessage');
 const cameraProfile=document.getElementById('cameraProfile');
 const applyCameraProfile=document.getElementById('applyCameraProfile');
+const applyCameraSetupButton=document.getElementById('applyCameraSetup');
 const cameraProfileMessage=document.getElementById('cameraProfileMessage');
 const imuEstimatorState=document.getElementById('imuEstimatorState');
 const imuAngle=document.getElementById('imuAngle');
@@ -316,6 +348,15 @@ if('ResizeObserver' in window){
   const observer=new ResizeObserver(()=>drawAngleChart(window.latestAngleRows||[]));
   observer.observe(angleChart.parentElement);
 }
+let accordionSync=false;
+for(const step of document.querySelectorAll('details[data-focus-panel]')){
+  step.addEventListener('toggle',()=>{
+    if(accordionSync||!step.open) return;
+    accordionSync=true;
+    for(const other of document.querySelectorAll('details[data-focus-panel]')) if(other!==step) other.open=false;
+    accordionSync=false;
+  });
+}
 function updateSliderLabels(){
   confidenceThresholdValue.textContent=Number(confidenceThreshold.value).toFixed(2);
   landmarkSmoothingValue.textContent=Number(landmarkSmoothing.value).toFixed(2);
@@ -323,28 +364,45 @@ function updateSliderLabels(){
   segmentLengthValue.textContent=Number(segmentLength.value).toFixed(3);
   angleJumpValue.textContent=Number(angleJump.value).toFixed(0)+'°';
 }
-for (const id of ['confidenceThreshold','landmarkSmoothing','angleSmoothing','segmentLength','angleJump']) {
-  document.getElementById(id).addEventListener('input',updateSliderLabels);
-}
+let poseControlsDirty=false;
+for(const slider of [confidenceThreshold,landmarkSmoothing,angleSmoothing,segmentLength,angleJump]) slider.addEventListener('input',()=>{
+  updateSliderLabels();
+  poseControlsDirty=true;
+  posePresetMessage.textContent='Unsaved slider changes.';
+});
 function loadTuning(t){
   if(!t) return;
-  for(const [key,id] of Object.entries(ids)) if(t[key]!==undefined) document.getElementById(id).value=t[key];
+  if(t.leg_side!==undefined) legSide.value=t.leg_side;
+  if(t.frame_rotation!==undefined) frameRotation.value=t.frame_rotation;
+  if(t.confidence_threshold!==undefined) confidenceThreshold.value=t.confidence_threshold;
+  if(t.landmark_smoothing!==undefined) landmarkSmoothing.value=t.landmark_smoothing;
+  if(t.angle_smoothing!==undefined) angleSmoothing.value=t.angle_smoothing;
+  if(t.min_segment_length!==undefined) segmentLength.value=t.min_segment_length;
+  if(t.max_angle_jump_deg!==undefined) angleJump.value=t.max_angle_jump_deg;
   updateSliderLabels();
+  poseControlsDirty=false;
 }
-async function applyTuning(){
-  const payload={
-    leg_side:legSide.value,
-    frame_rotation:frameRotation.value,
-    confidence_threshold:Number(confidenceThreshold.value),
-    landmark_smoothing:Number(landmarkSmoothing.value),
-    angle_smoothing:Number(angleSmoothing.value),
-    min_segment_length:Number(segmentLength.value),
-    max_angle_jump_deg:Number(angleJump.value)
-  };
+async function applyCameraSetup(){
+  const payload={leg_side:legSide.value,frame_rotation:frameRotation.value};
   const r=await fetch('/api/tuning',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
   const body=await r.json();
-  tuningMessage.textContent=r.ok?'Tuning applied live.':('Tuning rejected: '+(body.error||'unknown error'));
+  tuningMessage.textContent=r.ok?'Tracked leg and frame rotation applied. Fixed pose-filter settings were preserved.':('Camera setup rejected: '+(body.error||'unknown error'));
   if(r.ok) loadTuning(body);
+}
+function poseSettingsPayload(){
+  return {confidence_threshold:Number(confidenceThreshold.value),landmark_smoothing:Number(landmarkSmoothing.value),angle_smoothing:Number(angleSmoothing.value),min_segment_length:Number(segmentLength.value),max_angle_jump_deg:Number(angleJump.value)};
+}
+async function applyPoseSettings(){
+  const r=await fetch('/api/tuning',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(poseSettingsPayload())});
+  const body=await r.json();
+  posePresetMessage.textContent=r.ok?'Applied for this session. Saved default was not changed.':('Apply failed: '+(body.error||'unknown error'));
+  if(r.ok) loadTuning(body);
+}
+async function savePosePreset(){
+  const r=await fetch('/api/tuning/preset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(poseSettingsPayload())});
+  const body=await r.json();
+  posePresetMessage.textContent=r.ok?('Saved default: '+body.path):('Save failed: '+(body.error||'unknown error'));
+  if(r.ok) poseControlsDirty=false;
 }
 async function refreshImuPorts(){
   const selected=imuPort.value;
@@ -386,12 +444,12 @@ async function setCameraProfile(){
 }
 const CALIBRATION_GUIDANCE={
   static:{
-    title:'Static calibration test',
+    title:'Straight-leg static calibration test',
     intro:'The tool records for 12 seconds and then stops automatically.',
     steps:[
       'Wear both IMUs firmly on the thigh and shank of the leg shown to the camera.',
       'Keep the complete hip–knee–ankle chain visible and wait for Tracking VALID.',
-      'Choose one comfortable knee angle and remain completely still for the full test.'
+      'Hold a comfortable near-straight angle completely still; the measured optical angle is retained and is not forced to 180°.'
     ]
   },
   dynamic:{
@@ -455,11 +513,20 @@ async function cancelCalibrationTest(){
   calibrationMessage.textContent=r.ok?(body.message||'Calibration test cancelled.'):('Cancel failed: '+(body.error||'unknown error'));
 }
 
-async function recordStart(){
+async function recordStart(heldout=false){
   recordingPath.textContent='Starting video recording in video_recordings…';
-  const r=await fetch('/api/recording/start',{method:'POST'});
+  const r=await fetch('/api/recording/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({heldout:Boolean(heldout)})});
   const body=await r.json();
   recordingPath.textContent=r.ok?'Recording started. The export link will update automatically.':('Start failed: '+(body.error||'unknown error'));
+}
+async function validateHeldout(){
+  heldoutResult.textContent='Evaluating the three frozen parameter snapshots on the latest recording…';
+  const r=await fetch('/api/calibration/validate-heldout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({unchanged_setup:heldoutUnchangedSetup.checked})});
+  const body=await r.json();
+  if(!r.ok){ heldoutResult.textContent='Validation rejected: '+(body.error||'unknown error'); return; }
+  if(body.status==='INVALID'){ heldoutResult.textContent='INVALID · '+(body.error||'repeat the held-out acquisition'); return; }
+  const m=body.metrics||{}, before=m.static_calibrated||{}, after=m.bo_recommended||{};
+  heldoutResult.textContent=`${body.status} · static RMSE/MAE ${Number(before.rmse_deg).toFixed(2)}/${Number(before.mae_deg).toFixed(2)}° · BO RMSE/MAE ${Number(after.rmse_deg).toFixed(2)}/${Number(after.mae_deg).toFixed(2)}° · ${Number(body.frozen_pair_count||0)} identical pairs`;
 }
 async function recordStop(){
   recordingPath.textContent='Finalizing synchronized data and ZIP…';
@@ -491,9 +558,70 @@ function drawAngleChart(rows){
   line('visual_knee_angle_deg','visual_valid','#39a0ff'); line('imu_knee_angle_deg','imu_valid','#51e26d');
   ctx.fillStyle='#91a4bf'; ctx.font='10px Segoe UI'; ctx.fillText('−15 s',left,height-8); ctx.fillText('now',width-right-22,height-8);
 }
-async function refreshHistory(){ try{ const r=await fetch('/api/acquisition/history?seconds=15&max_points=300',{cache:'no-store'}); const body=await r.json(); if(r.ok){ window.latestAngleRows=body.rows||[]; drawAngleChart(window.latestAngleRows); } }catch(e){} }
+async function refreshHistory(){ try{ const r=await fetch('/api/acquisition/history?seconds=15&max_points=300',{cache:'no-store'}); const body=await r.json(); if(r.ok){ window.latestAngleRows=window.referenceBlinded?[]:(body.rows||[]); drawAngleChart(window.latestAngleRows); } }catch(e){} }
+let referenceRequestPending=false;
+let savedCaptures=[];
+function setReferenceBlind(blind){
+  window.referenceBlinded=blind;
+  if(blind){ angle.textContent='Hidden until manual confirmation'; rawAngle.textContent=''; angleDifference.textContent='--.-°'; window.latestAngleRows=[]; drawAngleChart([]); }
+}
+async function positionAction(action){
+  const out=document.getElementById('positionResult');
+  try{ const r=await fetch('/api/positioning',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action})});
+    const b=await r.json(); out.textContent=r.ok?b.reason:b.error;
+  }catch(e){ out.textContent=String(e); }
+}
+async function referenceAction(action){
+  if(referenceRequestPending) return;
+  referenceRequestPending=true;
+  if(action==='begin'){ setReferenceBlind(true); videoStream.removeAttribute('src'); document.getElementById('referenceMeasured').value=''; }
+  const payload={action,target_deg:Number(document.getElementById('referenceTarget').value),
+    setup:document.getElementById('referenceSetup').value,
+    reference_angle_deg:document.getElementById('referenceMeasured').value,
+    capture_id:document.getElementById('savedReference').value,
+    unchanged_setup:document.getElementById('unchangedSetup').checked};
+  try{
+    const r=await fetch('/api/goniometer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    const b=await r.json();
+    if(r.ok){ setReferenceBlind(Boolean(b.hide_angle)); updateReference(b); }
+    else{ document.getElementById('referenceState').textContent=b.error; }
+  }catch(e){ document.getElementById('referenceState').textContent=String(e); }
+  finally{ referenceRequestPending=false; if(action==='begin') videoStream.src='/video.mjpg?entry='+Date.now(); }
+}
+function updateSavedSetup(){
+  const row=savedCaptures.find(r=>r.capture_id===document.getElementById('savedReference').value);
+  document.getElementById('savedSetup').textContent=row?('Saved setup: '+row.setup):'No accepted capture selected';
+  document.getElementById('unchangedSetup').checked=false;
+}
+document.getElementById('savedReference').addEventListener('change',updateSavedSetup);
+function updateReference(g){
+  const busy=['CAPTURING','FINALIZING'].includes(g.state);
+  document.getElementById('referenceState').textContent=(g.state||'IDLE')+' · '+(g.message||'');
+  referenceStepStatus.textContent=String(g.state||'IDLE').replaceAll('_',' ');
+  referenceStepStatus.className='step-status '+(g.state==='PASSED'?'ok':(g.state==='FAILED'||g.state==='INVALID'?'bad':''));
+  document.getElementById('referenceMeasured').disabled=g.state!=='ENTRY';
+  document.getElementById('referenceConfirm').disabled=g.state!=='ENTRY'||referenceRequestPending;
+  document.getElementById('referenceCapture').disabled=g.state!=='CONFIRMED'||referenceRequestPending;
+  for(const id of ['referenceBegin','referenceClose','referenceReuse','referenceTarget','referenceSetup']) document.getElementById(id).disabled=busy;
+  const captures=g.captures||[]; const select=document.getElementById('savedReference');
+  if(captures.map(r=>r.capture_id).join()!==savedCaptures.map(r=>r.capture_id).join()){
+    const selected=select.value; select.replaceChildren(); savedCaptures=captures;
+    for(const row of captures){ const o=document.createElement('option'); o.value=row.capture_id; o.textContent='~'+row.target_deg+' / measured '+row.reference_angle_deg+' deg · '+row.capture_id.slice(0,8); select.appendChild(o); }
+    if(captures.some(r=>r.capture_id===selected)) select.value=selected;
+    updateSavedSetup();
+  }
+  const r=g.result; const lines=[];
+  if(r){ lines.push(r.status+' · measured '+r.reference_angle_deg+' deg (prompt '+r.target_deg+')');
+    for(const k of ['raw','filtered']){ const a=r.metrics[k]; if(a) lines.push(k+': mean '+a.mean_deg.toFixed(2)+' deg / signed error '+a.bias_deg.toFixed(2)+' deg'); }
+    lines.push('Coverage: '+r.hold.frames_valid+'/'+r.hold.frames_total+' · '+(100*r.hold.coverage).toFixed(1)+'%');
+    document.getElementById('referenceExport').href=r.report_url||'/exports/recordings/'; }
+  for(const p of g.repeatability||[]){ if(p.accepted_captures) lines.push('Prompt '+p.target_deg+': '+p.accepted_captures+' accepted · raw/filtered mean SD '+(p.raw.mean_sd_deg==null?'repeat needed':p.raw.mean_sd_deg.toFixed(2)+' / '+p.filtered.mean_sd_deg.toFixed(2)+' deg')); }
+  if((g.load_errors||[]).length) lines.push('Saved report load errors: '+g.load_errors.join('; '));
+  document.getElementById('referenceResults').textContent=lines.join('\n');
+}
 function updateImuRecommendations(cal){
   const p=(cal&&cal.recommended_parameters)||{};
+  const dynamicSuggestion=(cal&&cal.dynamic_suggestion)||{};
   if(cal&&cal.valid&&Object.keys(p).length){
     imuRecommendationState.textContent='Generated from the completed static and dynamic tests.';
     imuRecommendationState.className='note ok';
@@ -518,16 +646,25 @@ function updateImuRecommendations(cal){
   imuRecommendationValues.textContent='';
   if(cal&&String(cal.state||'').startsWith('ANALYZING')) imuRecommendationState.textContent='Analyzing calibration data and updating the shared suggestions YAML…';
   else if(cal&&(cal.state==='INVALID'||cal.state==='FAILED')) imuRecommendationState.textContent='No valid recommendation was generated. Review the calibration result and repeat the failed test.';
+  else if(cal&&Object.keys(dynamicSuggestion).length) imuRecommendationState.textContent='Dynamic-stage analysis is available; final settings remain subject to the completed-run validity checks.';
   else imuRecommendationState.textContent='Complete both stages of one calibration run to generate data-driven settings.';
 }
 async function refresh(){
   try {
     const r=await fetch('/api/status',{cache:'no-store'}); const s=await r.json();
+    const g=s.goniometer||{};
+    if(!referenceRequestPending) setReferenceBlind(Boolean(g.hide_angle));
+    updateReference(g);
+    const pos=s.positioning||{};
+    document.getElementById('positionResult').textContent=(pos.reason||'Ready to check tracking')+(pos.warning?' · WARNING: '+pos.warning:'');
+    positionStepStatus.textContent=String(pos.state||'IDLE').replaceAll('_',' ');
+    positionStepStatus.className='step-status '+(pos.state==='PASSED'?'ok':(pos.state==='FAILED'||pos.state==='RETRY'?'bad':''));
     const t=document.getElementById('tracking');
     t.textContent=s.tracking_valid?'VALID':'INVALID'; t.className='value '+(s.tracking_valid?'ok':'bad');
     reason.textContent=s.tracking_reason||'—';
     angle.textContent=s.visual_knee_angle_deg==null?'--.-°':Number(s.visual_knee_angle_deg).toFixed(1)+'°';
     rawAngle.textContent=s.raw_knee_angle_deg==null?'Raw: --.-°':'Raw: '+Number(s.raw_knee_angle_deg).toFixed(1)+'°';
+    if(window.referenceBlinded) setReferenceBlind(true);
     confidence.textContent=Number(s.pose_confidence).toFixed(2);
     fps.textContent=Number(s.inference_fps).toFixed(1)+' FPS';
     source.textContent='Source: '+(s.source||'—');
@@ -541,6 +678,9 @@ async function refresh(){
     imuSensors.textContent='Thigh: '+(imu.thigh_ready?'READY':'NOT READY')+' · Shank: '+(imu.shank_ready?'READY':'NOT READY');
     imuHealth.textContent='Samples: '+Number(imu.sample_count||0)+' · Gaps: '+Number(imu.sequence_gaps||0)+' · Parse errors: '+Number(imu.parse_errors||0)+' · Queue drops: '+Number(imu.queue_drops||0);
     if(imu.last_error) imuHealth.textContent+=' · Error: '+imu.last_error;
+    const imuReady=Boolean(imu.connected)&&Boolean(imu.thigh_ready&&imu.shank_ready);
+    imuReadySummary.textContent=imuReady?'READY':'NOT READY';
+    imuReadySummary.className='value small '+(imuReady?'ok':'bad');
     const est=s.imu_estimator||{};
     imuEstimatorState.textContent=est.valid?'VALID':String(est.filter_reason||est.reason||'NO SAMPLE').toUpperCase();
     imuEstimatorState.className='small '+(est.valid?'ok':'bad');
@@ -548,10 +688,11 @@ async function refresh(){
     imuSpeed.textContent=est.knee_speed_deg_s==null?'--.-°/s':Number(est.knee_speed_deg_s).toFixed(1)+'°/s';
     segmentAngles.textContent=(est.thigh_angle_deg==null?'--.-':Number(est.thigh_angle_deg).toFixed(1))+' / '+(est.shank_angle_deg==null?'--.-':Number(est.shank_angle_deg).toFixed(1))+'°';
     const visual=Number(s.visual_knee_angle_deg), imuValue=Number(est.knee_angle_deg);
-    angleDifference.textContent=(s.tracking_valid&&est.valid&&Number.isFinite(visual)&&Number.isFinite(imuValue))?(visual-imuValue).toFixed(1)+'°':'--.-°';
+    angleDifference.textContent=(!window.referenceBlinded&&s.visual_knee_angle_deg!=null&&s.tracking_valid&&est.valid&&Number.isFinite(visual)&&Number.isFinite(imuValue))?(visual-imuValue).toFixed(1)+'°':'--.-°';
     const params=est.parameters||{};
     imuFilterInfo.textContent='Config: '+(est.config_path||'defaults')+' · axis '+(params.rotation_axis_name||'—')+' · α '+Number(params.alpha_stable||0).toFixed(3)+' / '+Number(params.alpha_dynamic||0).toFixed(3)+' · offset '+Number(params.straight_leg_offset_deg||0).toFixed(1)+'°';
-    const calibrationLocked=Boolean((s.calibration||{}).active)||String((s.calibration||{}).state||'').startsWith('ANALYZING');
+    const referenceBusy=['CAPTURING','FINALIZING'].includes(g.state);
+    const calibrationLocked=referenceBusy||Boolean((s.calibration||{}).active)||String((s.calibration||{}).state||'').startsWith('ANALYZING');
     reloadImuFilter.disabled=Boolean((s.recording||{}).active)||calibrationLocked;
     const bridgeManaged=imu.transport==='uno-q-bridge';
     imuSerialControls.hidden=bridgeManaged;
@@ -563,20 +704,38 @@ async function refresh(){
     if(imu.port && [...imuPort.options].some(o=>o.value===imu.port)) imuPort.value=imu.port;
     const camera=s.camera||{};
     if(!window.cameraProfileLoaded && camera.profile){ cameraProfile.value=camera.profile; window.cameraProfileLoaded=true; }
+    cameraSetupStepStatus.textContent=camera.profile?String(camera.profile).toUpperCase():'READY';
     applyCameraProfile.disabled=Boolean((s.recording||{}).active)||calibrationLocked||camera.reconfigurable===false||!['CAMERA_PREVIEW','RUNNING','AI_FAILED'].includes(s.state);
+    applyCameraSetupButton.disabled=Boolean((s.recording||{}).active)||calibrationLocked;
     const cal=s.calibration||{};
+    sessionSetupId.textContent=cal.session_setup_id?('Session/setup ID: '+cal.session_setup_id):'A session/setup ID will be generated automatically at static calibration.';
     calibrationState.textContent=String(cal.state||'IDLE').replaceAll('_',' ');
     calibrationState.className='value small '+(cal.valid?'ok':(cal.state==='FAILED'||cal.state==='INVALID'?'bad':''));
+    calibrationStepStatus.textContent=String(cal.state||'IDLE').replaceAll('_',' ');
+    calibrationStepStatus.className='step-status '+(cal.valid?'ok':(cal.state==='FAILED'||cal.state==='INVALID'?'bad':''));
     calibrationMessage.textContent=cal.error?`${cal.message||''} Error: ${cal.error}`:(cal.message||'Start calibration with the static stage.');
     calibrationProgress.style.width=(100*Number(cal.progress||0)).toFixed(1)+'%';
     updateImuRecommendations(cal);
-    const calibrationBusy=Boolean(cal.active)||String(cal.state||'').startsWith('ANALYZING');
+    const calibrationBusy=referenceBusy||Boolean(cal.active)||String(cal.state||'').startsWith('ANALYZING');
     const sourceReady=Boolean(imu.connected)&&Boolean(imu.thigh_ready&&imu.shank_ready)&&Boolean(s.tracking_valid);
+    checkTrackingButton.disabled=pos.state==='CHECKING'||Boolean((s.recording||{}).active)||calibrationBusy||s.state!=='RUNNING';
     startStaticTest.disabled=calibrationBusy||Boolean((s.recording||{}).active)||!sourceReady||cal.state==='AWAITING_DYNAMIC';
     startStaticTest.textContent=(cal.state==='COMPLETE'||cal.state==='FAILED')?'Start new calibration':'Start calibration';
     startDynamicTest.disabled=calibrationBusy||Boolean((s.recording||{}).active)||!sourceReady||!Boolean(cal.static_suggestion&&Object.keys(cal.static_suggestion).length)||!['AWAITING_DYNAMIC','INVALID'].includes(cal.state);
     stopCalibrationTestButton.disabled=!Boolean(cal.active);
     cancelCalibrationTestButton.disabled=!Boolean(cal.active);
+    const heldout=cal.heldout_validation||{};
+    validateHeldoutButton.disabled=calibrationBusy||Boolean((s.recording||{}).active)||!Boolean((s.recording||{}).download_url)||!Boolean(cal.valid)||cal.state!=='COMPLETE';
+    if(heldout.status){
+      validationStepStatus.textContent=String(heldout.status).replaceAll('_',' ');
+      validationStepStatus.className='step-status '+(heldout.status==='IMPROVED_AGREEMENT'?'ok':(heldout.status==='INVALID'?'bad':''));
+      if(heldout.status==='INVALID') heldoutResult.textContent='INVALID · '+(heldout.error||'repeat the held-out acquisition');
+      else {
+        const hm=heldout.metrics||{}, hs=hm.static_calibrated||{}, hb=hm.bo_recommended||{};
+        heldoutResult.textContent=`${heldout.status} · static RMSE/MAE ${Number(hs.rmse_deg).toFixed(2)}/${Number(hs.mae_deg).toFixed(2)}° · BO RMSE/MAE ${Number(hb.rmse_deg).toFixed(2)}/${Number(hb.mae_deg).toFixed(2)}° · ${Number(heldout.frozen_pair_count||0)} identical pairs`;
+      }
+    }
+    if(cal.heldout_validation_url){ heldoutPath.href=cal.heldout_validation_url; heldoutPath.textContent='Open held-out result: '+cal.heldout_validation_display_path; }
     const calibrationHref=cal.recommendation_url||cal.browse_url||'/exports/calibration/';
     calibrationPath.href=calibrationHref;
     calibrationPath.setAttribute('aria-disabled',calibrationHref?'false':'true');
@@ -585,13 +744,30 @@ async function refresh(){
     const rec=s.recording||{};
     recording.textContent=rec.active?`RECORDING · ${Number(rec.elapsed_s||0).toFixed(1)} s · ${rec.frame_count||0} camera / ${rec.imu_sample_count||0} IMU samples`:'IDLE';
     recording.className='value small '+(rec.active?'rec':'');
-    startRecording.disabled=Boolean(rec.active)||calibrationBusy; stopRecording.disabled=!rec.active||Boolean(cal.active);
+    generalRecordingStatus.textContent=recording.textContent;
+    generalRecordingStatus.className=recording.className;
+    if(rec.active){ validationStepStatus.textContent='IN PROGRESS'; validationStepStatus.className='step-status rec'; }
+    else if(!heldout.status){ validationStepStatus.textContent=cal.valid&&cal.state==='COMPLETE'?'READY':'IDLE'; validationStepStatus.className='step-status'; }
+    startRecording.disabled=Boolean(rec.active)||calibrationBusy||!sourceReady||!Boolean(cal.valid)||cal.state!=='COMPLETE';
+    stopRecording.disabled=!rec.active||Boolean(cal.active);
+    startGeneralRecording.disabled=Boolean(rec.active)||calibrationBusy;
+    stopGeneralRecording.disabled=!rec.active||Boolean(cal.active);
+    const poseLocked=Boolean(rec.active)||calibrationLocked;
+    applyPoseSettingsButton.disabled=poseLocked;
+    savePosePresetButton.disabled=poseLocked;
+    const preset=s.pose_preset||{};
+    if(poseControlsDirty) posePresetMessage.textContent='Unsaved slider changes.';
+    else if(preset.error) posePresetMessage.textContent=preset.error;
+    else if(preset.saved) posePresetMessage.textContent='Saved default loaded: '+preset.path;
+    else if(preset.exists) posePresetMessage.textContent='Session values differ from saved default: '+preset.path;
+    else posePresetMessage.textContent='No saved default yet. Preset path: '+(preset.path||'—');
     const recordingHref=(!rec.active&&rec.download_url)?rec.download_url:(rec.browse_url||'/exports/recordings/');
     recordingPath.href=recordingHref;
     recordingPath.setAttribute('aria-disabled',recordingHref?'false':'true');
     if(rec.display_path) recordingPath.textContent=(rec.active?'ZIP destination: ':'Open saved ZIP: ')+rec.display_path;
     else recordingPath.textContent='Open video recordings: video_recordings';
     if(rec.error) recordingPath.textContent='Recorder error: '+rec.error;
+    resultsStepStatus.textContent=(cal.recommendation_url||rec.download_url||cal.heldout_validation_url)?'READY':'IDLE';
     if(!window.tuningLoaded && s.tuning){ loadTuning(s.tuning); window.tuningLoaded=true; }
   } catch(e) { runtime.textContent='UI connection error: '+e; }
 }
@@ -623,6 +799,31 @@ def create_app(runtime: VisionRuntime) -> Any:
     @app.get("/api/status")
     def status() -> Any:
         return jsonify(runtime.status())
+
+    @app.post("/api/positioning")
+    def positioning_action() -> Any:
+        payload = request.get_json(silent=True) or {}
+        try:
+            if not isinstance(payload, dict):
+                raise ValueError("Expected a JSON object")
+            return jsonify(runtime.positioning_action(str(payload.get("action", "")),
+                                                       payload.get("manual_side_on") is True))
+        except (ValueError, TypeError) as exc:
+            return jsonify({"error": str(exc)}), 400
+        except RuntimeError as exc:
+            return jsonify({"error": str(exc)}), 409
+
+    @app.post("/api/goniometer")
+    def reference_action() -> Any:
+        payload = request.get_json(silent=True) or {}
+        try:
+            if not isinstance(payload, dict):
+                raise ValueError("Expected a JSON object")
+            return jsonify(runtime.reference_action(str(payload.get("action", "")), payload))
+        except (ValueError, TypeError) as exc:
+            return jsonify({"error": str(exc)}), 400
+        except (RuntimeError, OSError) as exc:
+            return jsonify({"error": str(exc)}), 409
 
     @app.get("/exports/recordings/")
     def recordings_index() -> Any:
@@ -692,6 +893,18 @@ def create_app(runtime: VisionRuntime) -> Any:
         except RuntimeError as exc:
             return jsonify({"error": str(exc)}), 409
 
+    @app.post("/api/tuning/preset")
+    def save_tuning_preset() -> Any:
+        payload = request.get_json(silent=True) or {}
+        try:
+            if not isinstance(payload, dict):
+                raise ValueError("Expected a JSON object")
+            return jsonify(runtime.save_tuning_preset(payload))
+        except (ValueError, TypeError) as exc:
+            return jsonify({"error": str(exc)}), 400
+        except RuntimeError as exc:
+            return jsonify({"error": str(exc)}), 409
+
     @app.get("/api/imu/ports")
     def imu_ports() -> Any:
         try:
@@ -751,8 +964,18 @@ def create_app(runtime: VisionRuntime) -> Any:
 
     @app.post("/api/recording/start")
     def start_recording() -> Any:
+        payload = request.get_json(silent=True) or {}
         try:
-            return jsonify(runtime.start_recording())
+            if not isinstance(payload, dict):
+                raise ValueError("Expected a JSON object")
+            setup = str(payload.get("setup", ""))
+            if isinstance(payload.get("heldout"), bool):
+                return jsonify(
+                    runtime.start_recording(setup=setup, heldout=payload["heldout"])
+                )
+            return jsonify(runtime.start_recording(setup=setup) if setup else runtime.start_recording())
+        except (ValueError, TypeError) as exc:
+            return jsonify({"error": str(exc)}), 400
         except RuntimeError as exc:
             return jsonify({"error": str(exc)}), 409
 
@@ -774,6 +997,9 @@ def create_app(runtime: VisionRuntime) -> Any:
     def calibration_start() -> Any:
         payload = request.get_json(silent=True) or {}
         try:
+            setup = str(payload.get("setup", ""))
+            if setup:
+                return jsonify(runtime.start_calibration_test(str(payload.get("test_type", "")), setup=setup))
             return jsonify(runtime.start_calibration_test(str(payload.get("test_type", ""))))
         except (ValueError, TypeError) as exc:
             return jsonify({"error": str(exc)}), 400
@@ -791,6 +1017,21 @@ def create_app(runtime: VisionRuntime) -> Any:
     def calibration_cancel() -> Any:
         try:
             return jsonify(runtime.cancel_calibration_test())
+        except RuntimeError as exc:
+            return jsonify({"error": str(exc)}), 409
+
+    @app.post("/api/calibration/validate-heldout")
+    def calibration_validate_heldout() -> Any:
+        payload = request.get_json(silent=True) or {}
+        try:
+            if not isinstance(payload, dict):
+                raise ValueError("Expected a JSON object")
+            return jsonify(runtime.validate_latest_recording(
+                setup=str(payload.get("setup", "")),
+                unchanged_setup=payload.get("unchanged_setup") is True,
+            ))
+        except (ValueError, TypeError) as exc:
+            return jsonify({"error": str(exc)}), 400
         except RuntimeError as exc:
             return jsonify({"error": str(exc)}), 409
 

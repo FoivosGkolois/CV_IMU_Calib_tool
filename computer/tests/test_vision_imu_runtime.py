@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -469,6 +471,8 @@ def test_runtime_starts_guided_static_calibration_only_when_ready(tmp_path: Path
     status = runtime.start_calibration_test("static")
     assert status["active"] is True
     assert status["current_test"] == "static"
+    assert status["session_setup_id"].startswith("session_")
+    assert runtime.calibration.setup_metadata()["description"] == status["session_setup_id"]
     assert Path(status["run_directory"]).is_dir()
     cancelled = runtime.cancel_calibration_test()
     assert cancelled["active"] is False
@@ -512,3 +516,60 @@ def test_runtime_reports_portable_clickable_export_paths(tmp_path: Path) -> None
     assert status["calibration"]["browse_url"] == "/exports/calibration/"
     assert str(tmp_path) not in status["recording"]["display_path"]
     assert str(tmp_path) not in status["calibration"]["display_path"]
+
+
+def test_pose_preset_is_versioned_atomic_and_loaded_on_restart(tmp_path: Path) -> None:
+    recording_root = tmp_path / "video_recordings"
+    calibration_root = tmp_path / "calibration_suggestions"
+    runtime = VisionRuntime(
+        PreviewCamera(), FakeEstimator(),
+        recording_root=recording_root, calibration_root=calibration_root,
+    )  # type: ignore[arg-type]
+    values = {
+        "confidence_threshold": 0.42,
+        "landmark_smoothing": 0.61,
+        "angle_smoothing": 0.27,
+        "min_segment_length": 0.035,
+        "max_angle_jump_deg": 52.0,
+    }
+
+    saved = runtime.save_tuning_preset(values)
+    preset_path = Path(saved["path"])
+    document = json.loads(preset_path.read_text(encoding="utf-8"))
+    assert document == {"schema_version": 1, "pose_tuning": values}
+    assert not list(calibration_root.glob("pose_tuning_preset_v1.json.tmp-*"))
+
+    restarted = VisionRuntime(
+        PreviewCamera(), FakeEstimator(),
+        recording_root=recording_root, calibration_root=calibration_root,
+    )  # type: ignore[arg-type]
+    assert {key: restarted.tuning()[key] for key in values} == values
+    assert restarted.pose_preset_status()["loaded"] is True
+    assert restarted.pose_preset_status()["saved"] is True
+
+    preset_path.write_text('{"schema_version":99,"pose_tuning":{}}', encoding="utf-8")
+    rejected = VisionRuntime(
+        PreviewCamera(), FakeEstimator(),
+        recording_root=recording_root, calibration_root=calibration_root,
+    )  # type: ignore[arg-type]
+    assert "Could not load saved pose settings" in rejected.pose_preset_status()["error"]
+    assert rejected.tuning()["confidence_threshold"] == 0.30
+
+
+def test_pose_change_invalidates_calibration_and_is_blocked_during_recording(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = VisionRuntime(
+        PreviewCamera(), FakeEstimator(),
+        recording_root=tmp_path / "video_recordings",
+        calibration_root=tmp_path / "calibration_suggestions",
+    )  # type: ignore[arg-type]
+    invalidations: list[str] = []
+    monkeypatch.setattr(runtime.calibration, "invalidate_setup", invalidations.append)
+
+    runtime.update_tuning({"confidence_threshold": 0.41})
+    assert invalidations and "Pose configuration changed" in invalidations[0]
+
+    monkeypatch.setattr(runtime.recorder, "status", lambda: SimpleNamespace(active=True))
+    with pytest.raises(RuntimeError, match="Stop recording"):
+        runtime.update_tuning({"confidence_threshold": 0.43})

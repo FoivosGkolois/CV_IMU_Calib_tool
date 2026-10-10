@@ -8,7 +8,7 @@ import webbrowser
 from pathlib import Path
 
 from .camera_source import OpenCvCameraSource
-from .download_model import DEFAULT_TARGET, download_model
+from .download_model import DEFAULT_TARGET, LIGHTNING_TARGET, download_model
 from .imu_filter import (
     KneeAngleFilterMirror,
     KneeAngleFilterParameters,
@@ -52,7 +52,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     source.add_argument("--video", type=Path, help="Replay a video file instead of using a webcam")
     parser.add_argument("--leg", choices=[side.value for side in LegSide], default=LegSide.RIGHT.value)
-    parser.add_argument("--model", type=Path, default=DEFAULT_TARGET)
+    parser.add_argument("--model", type=Path, default=None)
+    parser.add_argument(
+        "--pose-model", choices=("thunder", "lightning"), default="thunder",
+        help="MoveNet variant (default: thunder for backwards-compatible PC runs)",
+    )
     parser.add_argument("--confidence", type=float, default=0.30)
     parser.add_argument("--inference-threads", type=int, default=4)
     parser.add_argument(
@@ -104,9 +108,10 @@ def main(argv: list[str] | None = None) -> int:
             f"Current interpreter: {sys.version.split()[0]}"
         )
     args = build_parser().parse_args(argv)
-    model_path = args.model.expanduser().resolve()
+    default_path = LIGHTNING_TARGET if args.pose_model == "lightning" else DEFAULT_TARGET
+    model_path = (args.model or default_path).expanduser().resolve()
     if not model_path.is_file():
-        download_model(model_path)
+        download_model(model_path, variant=args.pose_model)
 
     camera = OpenCvCameraSource(
         camera_index=None if args.video is not None else args.camera,
@@ -121,6 +126,7 @@ def main(argv: list[str] | None = None) -> int:
         model_path,
         num_threads=args.inference_threads,
         smart_crop=not args.no_smart_crop,
+        model_variant=args.pose_model,
     )
     imu_transport = args.imu_transport
     if imu_transport == "auto":

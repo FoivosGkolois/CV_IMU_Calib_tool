@@ -18,6 +18,7 @@ class FakeRuntime:
         self.connected: tuple[str, int] | None = None
         self.profile = "fast"
         self.calibration_test = ""
+        self.recording_request: tuple[str, bool | None] | None = None
 
     def status(self):
         return {
@@ -52,6 +53,9 @@ class FakeRuntime:
     def update_tuning(self, payload):
         return payload
 
+    def save_tuning_preset(self, payload):
+        return {"saved": True, "path": str(self.calibration_root / "pose_tuning_preset_v1.json"), "values": payload}
+
     def list_imu_ports(self):
         return [{"device": "COM4", "description": "UNO R4", "hwid": "USB"}]
 
@@ -67,7 +71,8 @@ class FakeRuntime:
         self.profile = profile
         return {"profile": profile, "width": 1280, "height": 720, "fps": 30.0}
 
-    def start_recording(self):
+    def start_recording(self, setup: str = "", *, heldout: bool | None = None):
+        self.recording_request = (setup, heldout)
         return {"active": True}
 
     def stop_recording(self):
@@ -164,18 +169,20 @@ def test_page_uses_responsive_non_user_resizable_layout(tmp_path: Path) -> None:
     assert "Custom layout" not in html
 
 
-def test_page_uses_fluid_three_column_dashboard_with_breakpoints(tmp_path: Path) -> None:
+def test_page_uses_camera_first_two_pane_dashboard_with_breakpoints(tmp_path: Path) -> None:
     runtime = FakeRuntime(tmp_path)
     html = create_app(runtime).test_client().get("/").get_data(as_text=True)  # type: ignore[arg-type]
 
     assert "VISION–IMU ACQUISITION & PRESENTATION" not in html
-    assert '<section class="camera-column">' in html
-    assert '<section class="live-column">' in html
-    assert html.index('class="camera-column"') < html.index('class="live-column"')
-    assert html.index('class="live-column"') < html.index('class="control-panel"')
-    assert "grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) minmax(300px,.8fr)" in html
-    assert "@media(max-width:1180px)" in html
-    assert "@media(max-width:760px)" in html
+    assert '<section class="visual-column"' in html
+    assert '<div class="camera-column">' in html
+    assert html.index('class="visual-column"') < html.index('class="control-panel"')
+    assert "grid-template-columns:minmax(0,58fr) minmax(380px,42fr)" in html
+    assert "position:sticky" in html
+    assert "object-fit:contain" in html
+    assert "max-height:88vh" in html
+    assert "@media (max-width:1100px)" in html
+    assert "@media (max-width:760px)" in html
 
 
 def test_page_hides_serial_controls_for_bridge_and_renders_recommendations(tmp_path: Path) -> None:
@@ -219,6 +226,27 @@ def test_guided_calibration_is_one_two_stage_session(tmp_path: Path) -> None:
         "calibration_suggestions/calibration_run_test"
     )
     assert opened.get_json()["url"].endswith("calibration_run_test/")
+
+
+def test_preset_and_recording_routes_preserve_explicit_modes(tmp_path: Path) -> None:
+    runtime = FakeRuntime(tmp_path)
+    client = create_app(runtime).test_client()  # type: ignore[arg-type]
+    values = {
+        "confidence_threshold": 0.4,
+        "landmark_smoothing": 0.5,
+        "angle_smoothing": 0.25,
+        "min_segment_length": 0.03,
+        "max_angle_jump_deg": 50,
+    }
+
+    saved = client.post("/api/tuning/preset", json=values)
+    assert saved.status_code == 200
+    assert saved.get_json()["saved"] is True
+
+    assert client.post("/api/recording/start", json={"heldout": True}).status_code == 200
+    assert runtime.recording_request == ("", True)
+    assert client.post("/api/recording/start", json={"heldout": False}).status_code == 200
+    assert runtime.recording_request == ("", False)
 
 
 def test_export_routes_list_and_serve_owned_files_without_traversal(tmp_path: Path) -> None:

@@ -1,0 +1,44 @@
+{
+  "evaluation_budget": 30,
+  "seed": 20260929,
+  "wall_seconds": 2.3814234000165015,
+  "cpu_seconds": 2.359375,
+  "frozen_pair_count": 500,
+  "fixed_lag_ms": 0.0,
+  "scope": "PC synthetic 12 s static (1200 IMU / 240 visual), 25 s dynamic (2500 IMU / 500 visual); process CPU during analysis; not UNO Q",
+  "training_metrics": {
+    "dynamic_baseline": {
+      "pair_count": 500,
+      "mae_deg": 19.15645569342083,
+      "rmse_deg": 19.15646191971969,
+      "p95_abs_error_deg": 19.174188904335868,
+      "max_abs_error_deg": 19.18209245601406,
+      "lag_ms": 0.0,
+      "jitter_deg_per_frame": 0.0008110763433251122,
+      "drift_deg": 0.00269034448719907,
+      "score": 22.991684170188226
+    },
+    "dynamic_static_calibrated": {
+      "pair_count": 500,
+      "mae_deg": 0.011386643166394208,
+      "rmse_deg": 0.012665730239847356,
+      "p95_abs_error_deg": 0.018886662562917423,
+      "max_abs_error_deg": 0.01910374664845449,
+      "lag_ms": 0.0,
+      "jitter_deg_per_frame": 0.0007168518827427306,
+      "drift_deg": 0.00044235335019493505,
+      "score": 0.015315738796408596
+    },
+    "dynamic_recommended": {
+      "pair_count": 500,
+      "mae_deg": 0.005221897083792072,
+      "rmse_deg": 0.005850892363105175,
+      "p95_abs_error_deg": 0.009230971486590534,
+      "max_abs_error_deg": 0.009420740975713215,
+      "lag_ms": 0.0,
+      "jitter_deg_per_frame": 0.0003326824223819358,
+      "drift_deg": 9.959910732959543e-05,
+      "score": 0.007127953655200429
+    }
+  }
+}

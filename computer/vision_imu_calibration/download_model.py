@@ -12,29 +12,43 @@ MODEL_URL = (
     "tflite/float16/4?lite-format=tflite"
 )
 MODEL_NAME = "MoveNet SinglePose Thunder TFLite Float16 v4"
+LIGHTNING_MODEL_URL = (
+    "https://tfhub.dev/google/lite-model/movenet/singlepose/lightning/"
+    "tflite/float16/4?lite-format=tflite"
+)
+LIGHTNING_MODEL_NAME = "MoveNet SinglePose Lightning TFLite Float16 v4"
+LIGHTNING_TARGET = Path(__file__).resolve().parent / "models" / "movenet_singlepose_lightning_float16.tflite"
+_LIGHTNING_MIN_MODEL_BYTES = 2_000_000
 DEFAULT_TARGET = Path(__file__).resolve().parent / "models" / "movenet_singlepose_thunder_float16.tflite"
 _MIN_MODEL_BYTES = 10_000_000
 
 
-def download_model(target: Path = DEFAULT_TARGET, *, force: bool = False) -> Path:
+def download_model(
+    target: Path = DEFAULT_TARGET, *, force: bool = False, variant: str = "thunder"
+) -> Path:
+    if variant not in ("thunder", "lightning"):
+        raise ValueError("variant must be thunder or lightning")
+    url = LIGHTNING_MODEL_URL if variant == "lightning" else MODEL_URL
+    name = LIGHTNING_MODEL_NAME if variant == "lightning" else MODEL_NAME
+    min_bytes = _LIGHTNING_MIN_MODEL_BYTES if variant == "lightning" else _MIN_MODEL_BYTES
     target = target.expanduser().resolve()
     target.parent.mkdir(parents=True, exist_ok=True)
-    if target.exists() and _looks_like_tflite(target) and not force:
+    if target.exists() and _looks_like_tflite(target, min_bytes=min_bytes) and not force:
         print(f"Pose model already present: {target}")
         return target
 
     temporary = target.with_suffix(target.suffix + ".part")
     temporary.unlink(missing_ok=True)
-    print(f"Downloading {MODEL_NAME} to:\n  {target}")
+    print(f"Downloading {name} to:\n  {target}")
     request = urllib.request.Request(
-        MODEL_URL,
+        url,
         headers={"User-Agent": "Vision-IMU-Calibration/1.0"},
     )
     try:
         with urllib.request.urlopen(request, timeout=120) as response, temporary.open("wb") as output:
             while chunk := response.read(1024 * 1024):
                 output.write(chunk)
-        if not _looks_like_tflite(temporary):
+        if not _looks_like_tflite(temporary, min_bytes=min_bytes):
             raise RuntimeError(
                 "Downloaded file is not a valid TFLite model. "
                 "Check internet access and retry the setup."
@@ -45,8 +59,8 @@ def download_model(target: Path = DEFAULT_TARGET, *, force: bool = False) -> Pat
 
     sha256 = hashlib.sha256(target.read_bytes()).hexdigest()
     metadata = {
-        "model_name": MODEL_NAME,
-        "source_url": MODEL_URL,
+        "model_name": name,
+        "source_url": url,
         "downloaded_at_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "size_bytes": target.stat().st_size,
         "sha256": sha256,
@@ -59,8 +73,8 @@ def download_model(target: Path = DEFAULT_TARGET, *, force: bool = False) -> Pat
     return target
 
 
-def _looks_like_tflite(path: Path) -> bool:
-    if not path.is_file() or path.stat().st_size < _MIN_MODEL_BYTES:
+def _looks_like_tflite(path: Path, *, min_bytes: int = _MIN_MODEL_BYTES) -> bool:
+    if not path.is_file() or path.stat().st_size < min_bytes:
         return False
     with path.open("rb") as model_file:
         header = model_file.read(8)
@@ -69,10 +83,12 @@ def _looks_like_tflite(path: Path) -> bool:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=f"Download the pinned {MODEL_NAME} model")
-    parser.add_argument("--target", type=Path, default=DEFAULT_TARGET)
+    parser.add_argument("--target", type=Path, default=None)
+    parser.add_argument("--variant", choices=("thunder", "lightning"), default="thunder")
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args()
-    download_model(args.target, force=args.force)
+    target = args.target or (LIGHTNING_TARGET if args.variant == "lightning" else DEFAULT_TARGET)
+    download_model(target, force=args.force, variant=args.variant)
     return 0
 
 

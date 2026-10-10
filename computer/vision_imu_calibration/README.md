@@ -252,13 +252,13 @@ The camera, metric cards, angle plot, and control cards automatically fit the av
 
 The live video overlay includes the compact tracking badge plus the thigh/shank bars, hip-knee-ankle markers, posterior knee-angle arc, and live angle value.
 
-## Guided two-stage calibration
+## Calibration and independent held-out validation
 
-The web GUI treats calibration as one deterministic session with two consecutive stages. Both stages require the IMU stream to be connected, both IMUs to be ready, and visual tracking to be valid.
+For the initial laboratory session, optionally collect the four physical-goniometer points, then run **Position Subject** and mark the subject/camera locations. Enter one setup ID/description and keep the same person, IMU mounting, selected leg, camera placement/profile and pose settings through calibration and held-out validation. Both calibration stages require the IMU stream to be connected, both IMUs to be ready, and visual tracking to be valid.
 
 ### Stage 1 — static
 
-Press **Start calibration**, read the instructions, and start the five-second countdown. The tool records automatically for 12 seconds. Keep the complete hip–knee–ankle chain visible and keep the leg completely still at one comfortable angle.
+Press **Start calibration**, read the instructions, and start the five-second countdown. The tool records automatically for 12 seconds. Keep the complete hip–knee–ankle chain visible and hold a comfortable near-straight angle completely still. The measured optical angle is retained; it is not forced to 180 degrees.
 
 The static stage estimates the common knee-angle offset, thigh and shank gyro biases, and a practical gyro deadband. It writes the first section of the shared `imu_filter_suggestions.yaml` and leaves the session in `AWAITING_DYNAMIC`.
 
@@ -266,9 +266,13 @@ The static stage estimates the common knee-angle offset, thigh and shank gyro bi
 
 Press **Continue to dynamic calibration**. After the five-second countdown, perform about five slow and smooth flexion–extension cycles. The tool records automatically for 25 seconds.
 
-The PC replays the recorded raw IMU data through a limited deterministic parameter grid. It compares the replayed IMU angle with the synchronized visual reference and completes the same YAML with the dynamic suggestion and final merged settings.
+The PC freezes the synchronized training pairs and runs 30 deterministic Gaussian-process Bayesian evaluations of only the three dynamic filter parameters. It compares every candidate on the same pairs at fixed host lag 0 ms and completes the same YAML with the dynamic suggestion and final merged settings.
 
 The workflow preserves the confirmed axis mapping and sign conventions. It does not rewrite hardware orientation parameters automatically.
+
+### Stage 3 — new held-out trial
+
+After Bayesian tuning finishes, use the existing **Start recording** and **Stop** controls for a new slow flexion–extension trial. Confirm the setup is unchanged, then press **Validate latest new recording**. The tool replays the frozen original, static-calibrated and BO-recommended snapshots on exactly the same new pairs; it does not refit bias, offset, parameters, visual angles or lag. `IMPROVED_AGREEMENT` means the BO snapshot has lower held-out RMSE than the static-calibrated snapshot. `NO_IMPROVEMENT` is retained honestly when training improved but the new trial did not. The comparison is not clinical accuracy or proof of camera accuracy; fixed host lag 0 ms does not establish zero camera/inference latency.
 
 ### Deterministic output ownership
 
@@ -292,6 +296,7 @@ dynamic_trial.zip
 imu_filter_suggestions.yaml
 calibration_report.json
 calibration_overview.png
+heldout_validation.json
 ```
 
 Both trial archives include their own video, raw IMU, processed IMU, synchronized timeline, metadata, and overview files. Static and dynamic never write to `video_recordings`, and the simple recorder never writes to `calibration_suggestions`.
@@ -312,3 +317,46 @@ UNO Q Bridge     --imu-transport uno-q-bridge
 `BridgeImuSource` preserves the existing `ImuCalibrationSample` contract, so pose processing, filtering, synchronization, recording, guided static/dynamic tests, and exported settings do not depend on the transport.
 
 For UNO Q deployment, run `13_BUILD_UNO_Q_PHASE2_APP.bat` from the project root and open the generated App in Arduino App Lab.
+# Optional subject positioning and goniometer comparison (Ticket 1)
+
+Open **Optional vision setup / laboratory validation** in the dashboard.
+**Position Subject** adds a fixed normalized hip cross and 5% frame-edge safe
+area to the existing, already-rotated camera stream. Mark the foot/chair location
+on the floor and record camera mounting/distance. The operator must manually
+confirm side-on orientation; 2-D landmarks cannot establish anatomical side-on.
+Start the slow sweep, flex to approximately 90 degrees, extend toward 175, return,
+then Finish. The check needs at least 3 seconds and 15 valid observations, gaps
+no greater than 0.75 seconds, hip within 10% of the target, and alternating
+flexed (<=110), extended (>=165), then returned endpoints. These tolerances
+allow approximate positioning; Passed applies only to the observed movement.
+A missing/low-confidence/off-frame observation requires Retry. Passed retains
+thin fixed guides; a hip shift greater than 6% or visibility loss warns without
+cancelling ordinary recordings. Camera profile, rotation, tuning, actual tracked
+leg changes and tracking restart reset Passed.
+
+For independent static comparison, describe subject ID, tripod/mounting/distance,
+floor mark/chair and goniometer. Choose a **prompt** (90/120/150/175), select
+**New / repeat point**, set the limb with a physical goniometer, and enter its
+actual measured posterior angle (180 = straight). The live image keeps its
+skeleton/arc but hides numerical AI angles; summary/chart data are blinded too.
+Confirm the manual value to reveal the AI readings, then Capture a 3-second
+stationary hold. Raw and displayed angles are preserved without correction.
+The existing recorder writes each hold to a unique ZIP under
+`video_recordings/goniometer/`; the adjacent JSON contains measured inputs,
+profile/setup, raw landmark observations, timestamps, SHA-256, signed AI-minus-
+measured errors, frame coverage and per-prompt repeatability for the same setup.
+It reuses `reference_validation.py` statistics and preserves ordinary ZIP/CSV schemas.
+Hold acceptance needs >=15 valid frames spanning >=2 seconds, no invalid frames
+or gaps >0.75 seconds (including hold edges), raw/displayed angle range <=3 degrees
+and raw landmark coordinate range <=2% of the frame. These conservative lab
+heuristics reject motion/dropouts; **Measured** does not certify accuracy.
+Failed attempts keep their own artifacts and do not replace accepted captures.
+Repeat a point freely. Stop the ordinary recording/calibration before a hold.
+
+Saved accepted reports reload on restart. Select a saved capture, reproduce its
+described setup in the setup field, and explicitly confirm unchanged physical
+setup. Reuse requires matching camera/pose/tuning/tracked-leg metadata and an
+unchanged recording hash. Routine trials do not require a goniometer or a Passed
+positioning check. Keep both optional features provisional until UNO Q checks:
+rotated overlay alignment, profile/leg/restart resets, live FPS, four real
+goniometer holds, failed repeat, export and restart/reuse.

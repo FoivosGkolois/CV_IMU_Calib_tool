@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import threading
 import time
+import json
+import math
+import os
+import uuid
 from collections import deque
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -20,6 +24,9 @@ from .imu_serial import IMUCAL_BAUD_RATE, SerialImuSource, list_serial_ports
 from .landmark_filter import LegLandmarkEmaFilter
 from .models import LegSide
 from .overlay import draw_leg_overlay
+from .positioning import PositioningCheck, visibility_reason
+from .reference_validation import (GONIOMETER_TARGETS, guided_capture_report,
+                                   guided_repeatability, measured_reference)
 from .pose_estimator import PoseEstimator
 from .recorder import AnnotatedVideoRecorder
 from .tuning import FrameRotation, RuntimeTuning
@@ -29,6 +36,15 @@ CAMERA_PROFILES: dict[str, tuple[int, int, float]] = {
     "fast": (640, 480, 30.0),
     "quality": (1280, 720, 30.0),
 }
+POSE_PRESET_SCHEMA_VERSION = 1
+POSE_PRESET_FILENAME = "pose_tuning_preset_v1.json"
+POSE_PRESET_FIELDS = (
+    "confidence_threshold",
+    "landmark_smoothing",
+    "angle_smoothing",
+    "min_segment_length",
+    "max_angle_jump_deg",
+)
 
 
 def _empty_imu_status() -> dict[str, Any]:
@@ -122,8 +138,20 @@ class VisionRuntime:
         self.calibration_root = Path(calibration_root).expanduser().resolve()
         self.recording_root.mkdir(parents=True, exist_ok=True)
         self.calibration_root.mkdir(parents=True, exist_ok=True)
+        self._pose_preset_path = self.calibration_root / POSE_PRESET_FILENAME
+        self._pose_preset_error = ""
+        self._pose_preset_loaded = False
+        self._saved_pose_tuning: dict[str, float] | None = None
+        self._load_pose_preset()
         self.recorder = AnnotatedVideoRecorder(self.recording_root)
         self.calibration = CalibrationWorkflow(self.calibration_root)
+        restored_setup = self.calibration.setup_metadata()
+        self._session_setup_id = str((restored_setup or {}).get("description", "")).strip()
+        if (restored_setup is not None
+                and restored_setup.get("pose_tuning") != self._tuning.to_dict()):
+            self.calibration.invalidate_setup(
+                "Saved calibration pose configuration differs from this restart; start a new calibration"
+            )
         self._calibration_timer_cancel: threading.Event | None = None
         self._calibration_timer_thread: threading.Thread | None = None
         self._calibration_action_lock = threading.RLock()
@@ -150,6 +178,41 @@ class VisionRuntime:
         self._pose_error = ""
         self._reset_tracking_event = threading.Event()
         self._camera_profile = self._infer_camera_profile()
+        self._positioning = PositioningCheck()
+        self._reference_root = self.recording_root / "goniometer"
+        self._reference_recorder = AnnotatedVideoRecorder(self._reference_root)
+        self._reference = {"state": "IDLE", "message": "Optional laboratory validation",
+                           "hide_angle": False, "result": None, "reused_capture_id": ""}
+        self._reference_inputs: dict[str, Any] = {}
+        self._reference_samples: list[dict[str, Any]] = []
+        self._reference_cancel = threading.Event()
+        self._reference_thread: threading.Thread | None = None
+        self._reference_captures: list[dict[str, Any]] = []
+        self._reference_load_errors: list[str] = []
+        # Only small reports are loaded; sample arrays remain in the exported file.
+        if self._reference_root.is_dir():
+            for report_path in sorted(self._reference_root.glob("goniometer_*.json")):
+                try:
+                    report = json.loads(report_path.read_text(encoding="utf-8"))
+                    if report.get("status") == "Measured":
+                        capture_id = str(report["capture_id"])
+                        if (uuid.UUID(hex=capture_id).hex != capture_id
+                                or report_path.stem != "goniometer_" + capture_id
+                                or report["recording_zip"] != report_path.with_suffix(".zip").name):
+                            raise ValueError("Saved capture identity / archive name mismatch")
+                        measured_reference(report["reference_angle_deg"])
+                        if not isinstance(report["profile"], dict) or not isinstance(report["setup"], str):
+                            raise ValueError("Saved setup metadata missing")
+                        if not report["hold"]["accepted"] or not report["metrics"]["sufficient_data"]:
+                            raise ValueError("Saved capture does not have accepted hold data")
+                        for key in ("raw", "filtered"):
+                            for metric in ("mean_deg", "bias_deg"):
+                                if not math.isfinite(report["metrics"][key][metric]):
+                                    raise ValueError("Saved capture has nonfinite statistics")
+                        report.pop("samples", None)
+                        self._reference_captures.append(report)
+                except (OSError, ValueError, TypeError, AttributeError, KeyError) as exc:
+                    self._reference_load_errors.append(f"{report_path.name}: {exc}")
         self._status = RuntimeStatus(
             state="IDLE",
             source=self.camera.description,
@@ -167,7 +230,266 @@ class VisionRuntime:
 
     def _calibration_locked(self) -> bool:
         status = self.calibration.status()
-        return status.active or status.state == "ANALYZING"
+        return status.active or status.state.startswith("ANALYZING") or self._reference_busy()
+
+    def _reference_busy(self) -> bool:
+        with self._lock:
+            return self._reference["state"] in {"CAPTURING", "FINALIZING"}
+
+    def _vision_setup(self) -> dict[str, Any]:
+        return {"camera": self.camera_status(), "tuning": self._tuning.to_dict(),
+                "pose_backend": getattr(self.estimator, "description", type(self.estimator).__name__),
+                "tracked_leg": self._status.tracked_leg}
+
+    @staticmethod
+    def _pose_tuning_values(tuning: RuntimeTuning) -> dict[str, float]:
+        payload = tuning.to_dict()
+        return {name: float(payload[name]) for name in POSE_PRESET_FIELDS}
+
+    def _load_pose_preset(self) -> None:
+        if not self._pose_preset_path.is_file():
+            return
+        try:
+            payload = json.loads(self._pose_preset_path.read_text(encoding="utf-8"))
+            if not isinstance(payload, dict) or payload.get("schema_version") != POSE_PRESET_SCHEMA_VERSION:
+                raise ValueError("unsupported pose preset schema")
+            values = payload.get("pose_tuning")
+            if not isinstance(values, Mapping) or set(values) != set(POSE_PRESET_FIELDS):
+                raise ValueError("pose preset must contain exactly the five supported settings")
+            updated = RuntimeTuning.from_mapping(values, current=self._tuning)
+            self._tuning = updated
+            self._saved_pose_tuning = self._pose_tuning_values(updated)
+            self._pose_preset_loaded = True
+        except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+            self._pose_preset_error = f"Could not load saved pose settings: {exc}"
+
+    def pose_preset_status(self) -> dict[str, Any]:
+        with self._lock:
+            current = self._pose_tuning_values(self._tuning)
+            saved = dict(self._saved_pose_tuning) if self._saved_pose_tuning is not None else None
+            error = self._pose_preset_error
+            loaded = self._pose_preset_loaded
+        return {
+            "schema_version": POSE_PRESET_SCHEMA_VERSION,
+            "path": str(self._pose_preset_path),
+            "exists": self._pose_preset_path.is_file(),
+            "loaded": loaded,
+            "saved": saved is not None and saved == current,
+            "error": error,
+        }
+
+    def save_tuning_preset(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        if not isinstance(payload, Mapping):
+            raise ValueError("Expected a JSON object")
+        if not set(POSE_PRESET_FIELDS).issubset(payload):
+            raise ValueError("All five pose settings are required")
+        self.update_tuning({name: payload[name] for name in POSE_PRESET_FIELDS})
+        with self._lock:
+            values = self._pose_tuning_values(self._tuning)
+        document = {
+            "schema_version": POSE_PRESET_SCHEMA_VERSION,
+            "pose_tuning": values,
+        }
+        temporary = self._pose_preset_path.with_name(
+            self._pose_preset_path.name + ".tmp-" + uuid.uuid4().hex
+        )
+        try:
+            temporary.write_text(
+                json.dumps(document, indent=2, sort_keys=True, allow_nan=False) + "\n",
+                encoding="utf-8",
+            )
+            os.replace(temporary, self._pose_preset_path)
+        except OSError as exc:
+            self._pose_preset_error = f"Could not save pose settings: {exc}"
+            raise RuntimeError(self._pose_preset_error) from exc
+        finally:
+            temporary.unlink(missing_ok=True)
+        with self._lock:
+            self._saved_pose_tuning = values
+            self._pose_preset_loaded = True
+            self._pose_preset_error = ""
+        return self.pose_preset_status()
+
+    def _session_description(self, explicit: str = "", *, new_run: bool = False) -> str:
+        text = str(explicit or "").strip()
+        if len(text) > 1000:
+            raise ValueError("Calibration setup description must be at most 1000 characters")
+        with self._lock:
+            if new_run:
+                self._session_setup_id = text or ("session_" + uuid.uuid4().hex)
+            elif text:
+                return text
+            elif not self._session_setup_id:
+                restored = self.calibration.setup_metadata()
+                self._session_setup_id = str((restored or {}).get("description", "")).strip()
+            if not self._session_setup_id:
+                raise RuntimeError("Calibration session setup is missing; start a new static calibration")
+            return self._session_setup_id
+
+    def _calibration_setup_snapshot(
+        self,
+        description: str,
+        imu_status: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        text = str(description or "").strip()
+        if not text:
+            return None
+        if len(text) > 1000:
+            raise ValueError("Calibration setup description must be at most 1000 characters")
+        status = dict(imu_status or (self.imu_source.status() if self.imu_source is not None else {}))
+        with self._lock:
+            tuning = self._tuning.to_dict()
+            backend = getattr(self.estimator, "description", type(self.estimator).__name__)
+            tracked_leg = self._status.tracked_leg
+            camera_source = self.camera.description
+            camera_profile = self._camera_profile
+        with self._imu_filter_lock:
+            filter_parameters = self._imu_filter.parameters.to_dict()
+            filter_parameters.pop("rotation_axis_name", None)
+            filter_parameters["rotation_axis"] = ("x", "y", "z")[self._imu_filter.parameters.rotation_axis]
+        return {
+            "description": text,
+            "camera_profile": camera_profile,
+            "camera_source": camera_source,
+            "pose_backend": backend,
+            "pose_tuning": tuning,
+            "tracked_leg": tracked_leg,
+            "imu_source": self._format_imu_description(status),
+            "imu_transport": str(status.get("transport", "") or ""),
+            "filter_parameters": filter_parameters,
+        }
+
+    def positioning_action(self, action: str, manual_side_on: bool = False) -> dict[str, Any]:
+        with self._lock:
+            if action == "show":
+                self._positioning.enabled = True
+            elif action in {"check", "start"}:
+                if self._status.state != "RUNNING":
+                    raise RuntimeError("Wait for live pose tracking")
+                self._positioning.begin(manual_side_on)
+            elif action == "finish":
+                return self._positioning.finish(time.perf_counter())
+            else:
+                raise ValueError("Positioning action must be check, show, start, or finish")
+            return self._positioning.snapshot()
+
+    def reference_status(self) -> dict[str, Any]:
+        with self._lock:
+            compatible = [r for r in self._reference_captures
+                          if r.get("setup") == self._reference_inputs.get("setup")
+                          and r.get("profile") == self._vision_setup()]
+            return {**self._reference, "captures": list(self._reference_captures),
+                    "load_errors": list(self._reference_load_errors),
+                    "repeatability": guided_repeatability(compatible),
+                    "repeatability_scope": "current described setup and exact camera/pose profile"}
+
+    def reference_action(self, action: str, payload: Mapping[str, Any]) -> dict[str, Any]:
+        with self._calibration_action_lock, self._lock:
+            if self._reference_busy():
+                raise RuntimeError("Wait for the current goniometer hold to finish")
+            if action == "cancel":
+                self._reference.update(state="IDLE", hide_angle=False, message="Validation closed")
+            elif action == "begin":
+                if self.recorder.status().active or self._calibration_locked():
+                    raise RuntimeError("Finish the current recording/calibration first")
+                target = payload.get("target_deg")
+                if isinstance(target, bool) or target not in GONIOMETER_TARGETS:
+                    raise ValueError("Choose a target prompt: 90, 120, 150, or 175")
+                setup = str(payload.get("setup", "")).strip()
+                if not setup or len(setup) > 2000:
+                    raise ValueError("Describe camera mounting/distance, floor mark, subject, and goniometer")
+                self._reference_inputs = {"capture_id": uuid.uuid4().hex, "target_deg": target,
+                                          "setup": setup, "profile": self._vision_setup(),
+                                          "reference_method": "operator_measured_goniometer"}
+                self._reference.update(state="ENTRY", hide_angle=True, result=None,
+                                       reused_capture_id="", message=f"Set ~{target} deg; enter the actual goniometer measurement")
+                # A previously published JPEG contains a numerical angle. Do not
+                # serve it while waiting for the first blinded camera frame.
+                self._latest_jpeg = None
+            elif action == "confirm":
+                if self._reference["state"] != "ENTRY":
+                    raise RuntimeError("Begin a new point before entering its measurement")
+                self._reference_inputs["reference_angle_deg"] = measured_reference(payload.get("reference_angle_deg"))
+                self._reference.update(state="CONFIRMED", hide_angle=False,
+                                       message="Manual value confirmed; keep still and Capture a 3-second hold")
+            elif action == "capture":
+                if self._reference["state"] != "CONFIRMED":
+                    raise RuntimeError("Confirm the measured goniometer value before Capture")
+                if self.recorder.status().active or self._calibration_locked():
+                    raise RuntimeError("Finish the current recording/calibration first")
+                if self._reference_inputs["profile"] != self._vision_setup():
+                    raise RuntimeError("Camera/pose profile changed; begin the point again")
+                if not self._status.tracking_valid or self._status.state != "RUNNING":
+                    raise RuntimeError("Live pose tracking must be valid")
+                self._reference_samples = []
+                self._reference_inputs["hold_start_host_monotonic_ns"] = time.perf_counter_ns()
+                self._reference_cancel = threading.Event()
+                self._reference_recorder.request_start(
+                    settings={**self._reference_inputs["profile"]["tuning"],
+                              "pose_backend": self._reference_inputs["profile"]["pose_backend"]},
+                    source=self.camera.description,
+                    session_name="goniometer_" + self._reference_inputs["capture_id"],
+                    extra_metadata={"recording_purpose": "goniometer_static_vision_validation",
+                                    "goniometer_reference": dict(self._reference_inputs),
+                                    "angle_convention": "180 deg straight; smaller means increased flexion"})
+                self._reference.update(state="CAPTURING", message="Hold still for 3 seconds")
+                self._reference_thread = threading.Thread(target=self._finish_reference_hold,
+                                                         name="goniometer-hold", daemon=True)
+                self._reference_thread.start()
+            elif action == "reuse":
+                if payload.get("unchanged_setup") is not True:
+                    raise ValueError("Operator must confirm the physical setup is unchanged")
+                capture = next((r for r in self._reference_captures
+                                if r["capture_id"] == payload.get("capture_id")), None)
+                if capture is None:
+                    raise ValueError("Choose an accepted saved capture")
+                if capture["profile"] != self._vision_setup() or capture["setup"] != str(payload.get("setup", "")).strip():
+                    raise ValueError("Saved setup/profile differs; repeat laboratory validation")
+                archive = self._reference_root / capture["recording_zip"]
+                from .reference_validation import _digest
+                if not archive.is_file() or _digest(archive) != capture["metrics"]["recording_sha256"]:
+                    raise ValueError("Saved recording missing or changed; repeat validation")
+                self._reference_inputs = {"setup": capture["setup"], "profile": capture["profile"]}
+                self._reference.update(state="REUSED", hide_angle=False,
+                                       reused_capture_id=capture["capture_id"], result=capture,
+                                       message="Saved comparison selected; operator confirms equivalent physical setup")
+            else:
+                raise ValueError("Unknown goniometer action")
+            return self.reference_status()
+
+    def _finish_reference_hold(self) -> None:
+        cancelled = self._reference_cancel.wait(3.0)
+        with self._lock:
+            self._reference.update(state="FINALIZING", message="Finalizing reference ZIP/report")
+            inputs = dict(self._reference_inputs)
+            inputs["hold_end_host_monotonic_ns"] = time.perf_counter_ns()
+            samples = list(self._reference_samples)
+        try:
+            recording = self._reference_recorder.stop()
+            if cancelled:
+                raise RuntimeError("Capture interrupted by runtime stop; Needs retry")
+            if recording.error:
+                raise RuntimeError(recording.error)
+            report = guided_capture_report(Path(recording.archive_path), inputs, samples)
+            with self._lock:
+                compatible = [r for r in self._reference_captures
+                              if r.get("setup") == inputs["setup"] and r.get("profile") == inputs["profile"]]
+            report["repeatability"] = guided_repeatability(compatible + [report])
+            report["repeatability_scope"] = "same described physical setup and camera/pose profile"
+            report_path = Path(recording.archive_path).with_suffix(".json")
+            report["report_url"] = "/exports/recordings/goniometer/" + report_path.name
+            report["download_url"] = "/exports/recordings/goniometer/" + Path(recording.archive_path).name
+            with report_path.open("x", encoding="utf-8") as output:
+                json.dump(report, output, indent=2, allow_nan=False)
+            report.pop("samples", None)
+            with self._lock:
+                if report["status"] == "Measured":
+                    self._reference_captures.append(report)
+                self._reference.update(state="MEASURED" if report["status"] == "Measured" else "RETRY",
+                                       result=report, message=report["hold"]["reason"] or "Measured; inspect signed errors and coverage")
+        except Exception as exc:
+            with self._lock:
+                self._reference.update(state="RETRY", message=str(exc), result=None)
 
     @property
     def imu_source(self) -> Any | None:
@@ -276,11 +598,14 @@ class VisionRuntime:
         cutoff_ns = time.perf_counter_ns() - int(seconds * 1_000_000_000)
         with self._imu_filter_lock:
             rows = [row for row in self._acquisition_history if row["host_monotonic_ns"] >= cutoff_ns]
-        if len(rows) <= max_points:
-            return rows
-        step = max(1, len(rows) // max_points)
-        sampled = rows[::step]
-        return sampled[-max_points:]
+        if len(rows) > max_points:
+            step = max(1, len(rows) // max_points)
+            rows = rows[::step][-max_points:]
+        with self._lock:
+            if self._reference["hide_angle"]:
+                return [{**row, "visual_knee_angle_deg": None, "visual_valid": False,
+                         "angle_difference_deg": None} for row in rows]
+        return rows
 
     def _reset_imu_estimator(self, reason: str) -> None:
         with self._imu_filter_lock:
@@ -352,6 +677,14 @@ class VisionRuntime:
             raise RuntimeError(f"Could not apply camera profile {normalized}: {exc}") from exc
 
         self._camera_profile = normalized
+        with self._lock:
+            self._positioning.reset("Camera profile changed; repeat positioning")
+            if self._reference["reused_capture_id"]:
+                self._reference.update(state="IDLE", result=None, message="Camera profile changed; saved selection reset")
+            self._reference["reused_capture_id"] = ""
+        self.calibration.invalidate_setup(
+            "Camera profile changed; start a new calibration before held-out validation"
+        )
         self._reset_tracking_event.set()
         next_state = (
             "AI_FAILED"
@@ -419,6 +752,7 @@ class VisionRuntime:
             if self._thread is not None and self._thread.is_alive():
                 return
             self._stop_event.clear()
+            self._positioning.reset("Tracking restarted; repeat positioning")
             self._pose_ready.clear()
             self._pose_failed.clear()
             self._pose_error = ""
@@ -449,6 +783,7 @@ class VisionRuntime:
 
     def stop(self, timeout_s: float = 5.0) -> None:
         self._stop_event.set()
+        self._reference_cancel.set()
         timer_cancel = self._calibration_timer_cancel
         if timer_cancel is not None:
             timer_cancel.set()
@@ -456,6 +791,11 @@ class VisionRuntime:
         if thread is not None and thread.is_alive():
             thread.join(timeout=max(0.0, float(timeout_s)))
         self.recorder.close()
+        reference_thread = self._reference_thread
+        if reference_thread is not None and reference_thread.is_alive():
+            reference_thread.join(timeout=max(0.0, float(timeout_s)))
+        with self._lock:
+            self._positioning.reset("Tracking stopped; repeat positioning")
         source = self.imu_source
         if source is not None:
             source.stop()
@@ -474,6 +814,11 @@ class VisionRuntime:
             payload = asdict(self._status)
             payload["tuning"] = self._tuning.to_dict()
             payload["pose_backend"] = getattr(self.estimator, "description", type(self.estimator).__name__)
+            payload["positioning"] = self._positioning.snapshot()
+            if self._reference["hide_angle"]:
+                payload["raw_knee_angle_deg"] = None
+                payload["visual_knee_angle_deg"] = None
+        payload["goniometer"] = self.reference_status()
         recording_payload = asdict(self.recorder.status())
         recording_payload.update(self._recording_export_payload(recording_payload))
         payload["recording"] = recording_payload
@@ -483,7 +828,26 @@ class VisionRuntime:
         payload["camera"] = self.camera_status()
         calibration_payload = asdict(self.calibration.status())
         calibration_payload.update(self._calibration_export_payload(calibration_payload))
+        calibration_payload["session_setup_id"] = self._session_setup_id
+        heldout = self.calibration.heldout_status()
+        calibration_payload["heldout_validation"] = heldout
+        run_directory = _optional_owned_path(
+            calibration_payload.get("run_directory"), self.calibration_root, directory=True
+        )
+        validation_path = run_directory / "heldout_validation.json" if run_directory else None
+        if validation_path is not None and validation_path.is_file():
+            relative = validation_path.relative_to(self.calibration_root)
+            calibration_payload["heldout_validation_url"] = (
+                f"/exports/calibration/{quote(relative.as_posix())}"
+            )
+            calibration_payload["heldout_validation_display_path"] = (
+                f"{self.calibration_root.name}/{relative.as_posix()}"
+            )
+        else:
+            calibration_payload["heldout_validation_url"] = ""
+            calibration_payload["heldout_validation_display_path"] = ""
         payload["calibration"] = calibration_payload
+        payload["pose_preset"] = self.pose_preset_status()
         return payload
 
     def _recording_export_payload(self, status: Mapping[str, Any]) -> dict[str, str]:
@@ -537,17 +901,32 @@ class VisionRuntime:
             return self._tuning.to_dict()
 
     def update_tuning(self, payload: Mapping[str, Any]) -> dict[str, Any]:
-        if self._calibration_locked():
-            raise RuntimeError("Stop the calibration test before changing pose-reference tuning")
-        with self._lock:
-            self._tuning = RuntimeTuning.from_mapping(payload, current=self._tuning)
-            self._status = RuntimeStatus(
-                **{
-                    **asdict(self._status),
-                    "requested_leg": self._tuning.leg_side.value,
-                }
-            )
-            return self._tuning.to_dict()
+        with self._calibration_action_lock:
+            if self._calibration_locked():
+                raise RuntimeError("Stop the active calibration/validation before changing pose settings")
+            if self.recorder.status().active:
+                raise RuntimeError("Stop recording before changing pose settings")
+            with self._lock:
+                updated = RuntimeTuning.from_mapping(payload, current=self._tuning)
+                changed = updated != self._tuning
+                if changed:
+                    self._positioning.reset("Pose tuning changed; repeat tracking check")
+                    if self._reference["reused_capture_id"]:
+                        self._reference.update(state="IDLE", result=None, message="Pose tuning changed; saved selection reset")
+                    self._reference["reused_capture_id"] = ""
+                self._tuning = updated
+                self._status = RuntimeStatus(
+                    **{
+                        **asdict(self._status),
+                        "requested_leg": self._tuning.leg_side.value,
+                    }
+                )
+                result = self._tuning.to_dict()
+            if changed:
+                self.calibration.invalidate_setup(
+                    "Pose configuration changed; start a new calibration before held-out validation"
+                )
+            return result
 
     @staticmethod
     def _format_imu_description(status: Mapping[str, Any]) -> str:
@@ -555,9 +934,39 @@ class VisionRuntime:
         baud_rate = int(status.get("baud_rate", 0) or 0)
         return f"{port}@{baud_rate}" if port and baud_rate > 0 else port
 
-    def start_recording(self) -> dict[str, Any]:
+    def start_recording(
+        self,
+        setup: str = "",
+        *,
+        heldout: bool | None = None,
+    ) -> dict[str, Any]:
         if self._calibration_locked():
             raise RuntimeError("A calibration test is already recording")
+        runtime_status = self.status()
+        calibration_status = runtime_status.get("calibration", {})
+        heldout_context: dict[str, Any] | None = None
+        heldout_setup: dict[str, Any] | None = None
+        validation_id = ""
+        calibration_complete = (
+            calibration_status.get("valid") and calibration_status.get("state") == "COMPLETE"
+        )
+        use_heldout = heldout is True or (
+            heldout is None and calibration_complete and bool(str(setup).strip())
+        )
+        if heldout is True and not calibration_complete:
+            raise RuntimeError("Complete a valid Bayesian calibration before recording held-out data")
+        if use_heldout:
+            imu = runtime_status.get("imu", {})
+            if (not imu.get("connected") or not imu.get("capture_active")
+                    or not imu.get("thigh_ready") or not imu.get("shank_ready")
+                    or not runtime_status.get("tracking_valid")):
+                raise RuntimeError("Held-out recording requires READY IMUs and VALID visual tracking")
+            heldout_context = self.calibration.heldout_context()
+            description = self._session_description(setup)
+            heldout_setup = self._calibration_setup_snapshot(description, imu)
+            if heldout_setup != heldout_context["calibration_setup"]:
+                raise RuntimeError("Physical/camera/filter setup changed; repeat calibration or restore it")
+            validation_id = uuid.uuid4().hex
         with self._lock:
             tuning = self._tuning.to_dict()
             tuning["pose_backend"] = getattr(self.estimator, "description", type(self.estimator).__name__)
@@ -568,10 +977,28 @@ class VisionRuntime:
                 imu_status = imu_source.status()
                 imu_description = self._format_imu_description(imu_status)
         tuning["imu_filter"] = self.imu_estimator_status()
+        tuning["pose_preset"] = self.pose_preset_status()
+        extra_metadata: dict[str, Any] | None = None
+        session_name: str | None = None
+        if heldout_context is not None and heldout_setup is not None:
+            session_name = "heldout_" + validation_id
+            extra_metadata = {
+                "recording_purpose": "vision_imu_filter_heldout_validation",
+                "validation_id": validation_id,
+                "calibration_run_id": calibration_status["run_id"],
+                "calibration_report_sha256": heldout_context["calibration_report_sha256"],
+                "training_archive_sha256": heldout_context["training_sha256"],
+                "parameter_snapshot_sha256": heldout_context["parameter_sha256"],
+                "fixed_lag_ms": 0.0,
+                "pairing_policy": heldout_context["calibration_report"]["optimization"]["reference_sampling_policy"],
+                "calibration_setup": heldout_setup,
+            }
         self.recorder.request_start(
             settings=tuning,
             source=source,
             imu_source=imu_description,
+            session_name=session_name,
+            extra_metadata=extra_metadata,
         )
         if imu_source is not None and imu_source.configured:
             imu_status = imu_source.status()
@@ -583,8 +1010,10 @@ class VisionRuntime:
                     raise
         return self.status()["recording"]
 
-    def start_calibration_test(self, test_type: str) -> dict[str, Any]:
+    def start_calibration_test(self, test_type: str, setup: str = "") -> dict[str, Any]:
         with self._calibration_action_lock:
+            if self._reference_busy():
+                raise RuntimeError("Finish the goniometer hold before starting calibration")
             if self.recorder.status().active:
                 raise RuntimeError("Stop the current recording before starting calibration")
             status = self.status()
@@ -596,11 +1025,20 @@ class VisionRuntime:
             if not status.get("tracking_valid"):
                 raise RuntimeError("Vision tracking must be VALID before the test starts")
 
+            normalized_test = str(test_type or "").strip().lower()
+            if normalized_test not in {"static", "dynamic"}:
+                raise ValueError("Calibration test_type must be 'static' or 'dynamic'")
+            description = self._session_description(
+                setup,
+                new_run=normalized_test == "static",
+            )
             with self._imu_filter_lock:
                 base_parameters = self._imu_filter.parameters
+            setup_metadata = self._calibration_setup_snapshot(description, imu)
             prepared = self.calibration.prepare_test(
-                test_type,
+                normalized_test,
                 base_parameters=base_parameters,
+                setup_metadata=setup_metadata,
             )
             with self._lock:
                 tuning = self._tuning.to_dict()
@@ -610,6 +1048,7 @@ class VisionRuntime:
                 source_description = self.camera.description
             imu_description = self._format_imu_description(imu)
             tuning["imu_filter"] = self.imu_estimator_status()
+            tuning["pose_preset"] = self.pose_preset_status()
             run_directory = Path(prepared["run_directory"])
             try:
                 self.recorder.request_start(
@@ -622,6 +1061,7 @@ class VisionRuntime:
                         "recording_purpose": "vision_imu_filter_calibration",
                         "calibration_test_type": prepared["test_type"],
                         "automatic_duration_s": prepared["duration_s"],
+                        "calibration_setup": setup_metadata,
                     },
                 )
             except Exception as exc:
@@ -699,6 +1139,30 @@ class VisionRuntime:
             raise RuntimeError("Use the calibration stop control for an active calibration test")
         self.recorder.stop()
         return self.status()["recording"]
+
+    def validate_latest_recording(
+        self,
+        *,
+        setup: str = "",
+        unchanged_setup: bool,
+    ) -> dict[str, Any]:
+        with self._calibration_action_lock:
+            if self._reference_busy() or self.calibration.status().active:
+                raise RuntimeError("Finish the current acquisition before held-out validation")
+            recording = self.recorder.status()
+            if recording.active:
+                raise RuntimeError("Stop and finalize the new recording before validation")
+            archive = _optional_owned_path(recording.archive_path, self.recording_root)
+            if archive is None:
+                raise RuntimeError("No finalized recording is available for validation")
+            imu_status = self.imu_source.status() if self.imu_source is not None else {}
+            description = self._session_description(setup)
+            current_setup = self._calibration_setup_snapshot(description, imu_status)
+            return self.calibration.validate_heldout(
+                archive,
+                current_setup=current_setup,
+                unchanged_setup=bool(unchanged_setup),
+            )
 
     def open_recordings_location(self) -> dict[str, str]:
         return {"path": self.recording_root.name, "url": "/exports/recordings/"}
@@ -823,6 +1287,8 @@ class VisionRuntime:
                     landmark_filter.reset()
                     smoothed_angle = None
                     smoothed_leg = None
+                    with self._lock:
+                        self._positioning.reset("Tracking reset; repeat positioning")
                     reset_tracking = getattr(self.estimator, "reset_tracking", None)
                     if callable(reset_tracking):
                         reset_tracking()
@@ -838,6 +1304,7 @@ class VisionRuntime:
                 frame = self._rotate_frame(frame, tuning.frame_rotation, cv2)
 
                 leg = None
+                raw_leg = None
                 raw_angle = KneeAngleResult(None, False, 0.0, "initializing_pose_model")
                 filtered_angle = raw_angle
                 tracked_leg = None
@@ -908,6 +1375,24 @@ class VisionRuntime:
                 else:
                     ema_fps = 0.0
 
+                with self._lock:
+                    # Raw observations detect real movement; display smoothing
+                    # must not conceal off-frame points or transient dropouts.
+                    previous_side = self._positioning.context[4] if self._positioning.context else None
+                    side = raw_leg.side.value if raw_leg is not None else previous_side
+                    context = (self.camera.description, self._camera_profile,
+                               tuning.frame_rotation.value, tuning.leg_side.value, side,
+                               frame.shape[1], frame.shape[0])
+                    self._positioning.set_context(context)
+                    if (self._reference["reused_capture_id"] and
+                            self._reference_inputs.get("profile", {}).get("tracked_leg") != side):
+                        self._reference.update(state="IDLE", result=None, reused_capture_id="",
+                                               message="Tracked leg changed; saved comparison selection reset")
+                    positioning_angle = raw_angle if filtered_angle.valid else filtered_angle
+                    self._positioning.observe(host_monotonic_ns / 1e9, raw_leg,
+                                              positioning_angle, tuning.confidence_threshold)
+                    position_status = self._positioning.snapshot()
+                    hide_angle = self._reference["hide_angle"]
                 annotated = draw_leg_overlay(
                     frame,
                     leg,
@@ -915,6 +1400,8 @@ class VisionRuntime:
                     inference_fps=ema_fps,
                     source_description=self.camera.description,
                     recording_active=self.recorder.status().active,
+                    hide_angle=hide_angle,
+                    positioning=position_status,
                 )
                 ok, encoded = cv2.imencode(".jpg", annotated, [int(cv2.IMWRITE_JPEG_QUALITY), 86])
                 if not ok:
@@ -964,6 +1451,32 @@ class VisionRuntime:
                         }
                     )
                 self.recorder.write(annotated, preferred_fps=ema_fps or 15.0, sample=sample)
+                with self._lock:
+                    if (self._reference["state"] == "CAPTURING" and host_monotonic_ns
+                            >= self._reference_inputs["hold_start_host_monotonic_ns"]):
+                        observation = {"host_monotonic_ns": host_monotonic_ns,
+                                       "tracked_leg": tracked_leg,
+                                       "pose_confidence": raw_angle.confidence,
+                                       "raw_tracking_valid": raw_angle.valid,
+                                       "tracking_valid": filtered_angle.valid,
+                                       "tracking_reason": filtered_angle.reason,
+                                       "raw_knee_angle_deg": raw_angle.angle_deg,
+                                       "visual_knee_angle_deg": filtered_angle.angle_deg,
+                                       "valid": filtered_angle.valid and not visibility_reason(
+                                           raw_leg, raw_angle, tuning.confidence_threshold)}
+                        if (self._reference_inputs["profile"]["tuning"] != tuning.to_dict()
+                                or self._reference_inputs["profile"] != self._vision_setup()):
+                            observation["valid"] = False
+                        for name in ("hip", "knee", "ankle"):
+                            point = getattr(raw_leg, name) if raw_leg is not None else None
+                            for axis in ("x", "y"):
+                                observation[f"{name}_{axis}"] = getattr(point, axis) if point is not None else None
+                        for key, value in observation.items():
+                            if isinstance(value, float) and not math.isfinite(value):
+                                observation[key] = None
+                                observation["valid"] = False
+                        self._reference_recorder.write(annotated, preferred_fps=ema_fps or 15.0, sample=sample)
+                        self._reference_samples.append(observation)
 
                 if self._pose_failed.is_set():
                     state = "AI_FAILED"
@@ -976,7 +1489,8 @@ class VisionRuntime:
                     error = ""
 
                 with self._new_frame:
-                    self._latest_jpeg = encoded.tobytes()
+                    if hide_angle == self._reference["hide_angle"]:
+                        self._latest_jpeg = encoded.tobytes()
                     self._frame_sequence += 1
                     self._status = RuntimeStatus(
                         state=state,

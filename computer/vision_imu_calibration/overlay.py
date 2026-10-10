@@ -5,6 +5,7 @@ from typing import Any
 
 from .geometry import KneeAngleResult
 from .models import LegLandmarks
+from .positioning import SAFE_AREA
 
 
 THIGH_COLOR = (255, 190, 0)
@@ -24,6 +25,8 @@ def draw_leg_overlay(
     inference_fps: float,
     source_description: str,
     recording_active: bool = False,
+    hide_angle: bool = False,
+    positioning: dict | None = None,
 ) -> Any:
     """Return the live camera frame with pose geometry and compact status.
 
@@ -45,7 +48,7 @@ def draw_leg_overlay(
         joint_radius = max(6, int(round(min(width, height) * 0.014)))
         cv2.line(output, hip, knee, THIGH_COLOR, line_width, cv2.LINE_AA)
         cv2.line(output, knee, ankle, SHANK_COLOR, line_width, cv2.LINE_AA)
-        _draw_knee_arc(output, hip, knee, ankle, angle)
+        _draw_knee_arc(output, hip, knee, ankle, angle, hide_angle=hide_angle)
 
         for point in (hip, knee, ankle):
             cv2.circle(output, point, joint_radius + 3, (10, 10, 10), -1, cv2.LINE_AA)
@@ -63,6 +66,16 @@ def draw_leg_overlay(
         )
 
     _draw_tracking_badge(output, angle)
+    if positioning and positioning.get("enabled"):
+        # Inference and guides share the already-rotated frame, independent of
+        # the browser's object-fit scaling and landscape/portrait dimensions.
+        color = (100, 160, 100) if positioning.get("state") == "PASSED" else (230, 180, 70)
+        thickness = 1 if positioning.get("state") == "PASSED" else 2
+        cv2.rectangle(output, _pixel(SAFE_AREA[0], SAFE_AREA[1], width, height),
+                      _pixel(SAFE_AREA[2], SAFE_AREA[3], width, height), color, thickness)
+        if positioning.get("warning"):
+            cv2.putText(output, "POSITION WARNING", (12, height - 15),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, INVALID_COLOR, 2, cv2.LINE_AA)
     return output
 
 
@@ -105,6 +118,7 @@ def _draw_knee_arc(
     knee: tuple[int, int],
     ankle: tuple[int, int],
     angle: KneeAngleResult,
+    *, hide_angle: bool = False,
 ) -> None:
     cv2 = _load_cv2()
     thigh_length = math.hypot(hip[0] - knee[0], hip[1] - knee[1])
@@ -123,6 +137,8 @@ def _draw_knee_arc(
         int(round(knee[0] + label_radius * math.cos(math.radians(mid_deg)))),
         int(round(knee[1] - label_radius * math.sin(math.radians(mid_deg)))),
     )
+    if hide_angle:
+        return
     cv2.putText(
         frame,
         f"{angle.angle_deg:.0f} deg",
