@@ -59,21 +59,35 @@ def test_compact_status_and_collapsible_chart_preserve_camera_space() -> None:
     assert "observer.observe(angleChart.parentElement);" in _PAGE
 
 
-def test_final_pose_settings_are_read_only_and_camera_setup_remains_adjustable() -> None:
+def test_vision_tune_sliders_are_restored_without_changing_the_fixed_advanced_panel() -> None:
+    camera = _PAGE.split('id="cameraSetupStep"', 1)[1].split('id="referencePanel"', 1)[0]
     advanced = _PAGE.split("Advanced / Diagnostics", 1)[1].split("</details>", 1)[0]
-    for slider_id in ("confidenceThreshold", "landmarkSmoothing", "angleSmoothing",
-                      "segmentLength", "angleJump", "overlayStroke"):
-        assert f'id="{slider_id}"' not in _PAGE
-    assert 'type="range"' not in _PAGE
-    assert 'id="applyPoseSettings"' not in advanced
-    assert 'id="savePosePreset"' not in advanced
-    assert "confidence 0.29" in advanced
-    assert "landmark smoothing 0.30" in advanced
-    assert "angle smoothing 0.70" in advanced
-    assert "minimum segment 0.025" in advanced
-    assert "maximum jump 45°" in advanced
-    assert "const payload={leg_side:legSide.value,frame_rotation:frameRotation.value}" in _PAGE
+    sliders = {
+        "confidenceThreshold": ("0.05", "0.99", "any", "0.29"),
+        "landmarkSmoothing": ("0", "0.95", "any", "0.30"),
+        "angleSmoothing": ("0", "0.95", "any", "0.70"),
+        "segmentLength": ("0.005", "0.200", "any", "0.025"),
+        "angleJump": ("5", "180", "any", "45"),
+    }
+    assert 'id="visionTunePanel"' in camera
+    for slider_id, (minimum, maximum, step, value) in sliders.items():
+        assert re.search(
+            rf'<input id="{slider_id}" type="range" min="{minimum}" max="{maximum}" '
+            rf'step="{step}" value="{value}">', camera
+        )
+        assert f'id="{slider_id}"' not in advanced
+    assert 'id="applyPoseSettings"' in camera
+    assert 'id="savePosePreset"' in camera
+    assert "function visionTunePayload()" in _PAGE
+    assert "async function applyPoseSettings()" in _PAGE
+    assert "async function savePosePreset()" in _PAGE
     assert "fetch('/api/tuning'" in _PAGE
+    assert "fetch('/api/tuning/preset'" in _PAGE
+    assert "setPosePresetLock(Boolean((s.pose_preset||{}).locked))" in _PAGE
+    assert "field.input.disabled=locked" in _PAGE
+    assert "Pose filter settings are fixed for the selected configuration." not in _PAGE
+    assert "Apply before calibration" in _PAGE
+    assert "const payload={leg_side:legSide.value,frame_rotation:frameRotation.value}" in _PAGE
 
     defaults = RuntimeTuning()
     assert defaults.confidence_threshold == 0.29

@@ -64,6 +64,29 @@ def test_final_uno_q_frozen_values_ignore_stale_local_preset(tmp_path: Path):
     assert r.tuning()['landmark_smoothing'] == pytest.approx(.30)
 
 
+
+def test_unlocked_uno_q_startup_allows_tuning_and_persistent_preset(tmp_path: Path):
+    calibration = tmp_path / 'calibration'
+    recording = tmp_path / 'recordings'
+    runtime = VisionRuntime(Camera(), Estimator(), leg_side=LegSide.LEFT,
+                            pose_filters_locked=False, recording_root=recording,
+                            calibration_root=calibration)
+    assert runtime.pose_preset_status()['locked'] is False
+    assert runtime.tuning()['leg_side'] == 'left'
+    assert runtime.update_tuning({'confidence_threshold': .5})['confidence_threshold'] == pytest.approx(.5)
+    current = runtime.tuning()
+    preset = {name: current[name] for name in ('confidence_threshold',
+             'landmark_smoothing', 'angle_smoothing', 'min_segment_length',
+             'max_angle_jump_deg')}
+    assert runtime.save_tuning_preset(preset)['saved'] is True
+    restarted = VisionRuntime(Camera(), Estimator(), leg_side=LegSide.LEFT,
+                              pose_filters_locked=False, recording_root=recording,
+                              calibration_root=calibration)
+    assert restarted.pose_preset_status()['loaded'] is True
+    assert restarted.tuning()['confidence_threshold'] == pytest.approx(.5)
+    assert restarted.tuning()['leg_side'] == 'left'
+
+
 def test_pc_mode_retains_backward_compatible_live_tuning(tmp_path):
     r = VisionRuntime(Camera(), Estimator(), calibration_root=tmp_path/'calibration',
                       recording_root=tmp_path/'recordings')
@@ -71,9 +94,9 @@ def test_pc_mode_retains_backward_compatible_live_tuning(tmp_path):
     assert r.update_tuning({'landmark_smoothing':.58})['landmark_smoothing'] == pytest.approx(.58)
 
 
-def test_applab_launch_pins_lightning_four_threads_left_and_lock():
+def test_applab_launch_pins_lightning_four_threads_left_and_allows_live_tuning():
     project=Path(__file__).resolve().parents[2]
     contents=(project/'standalone_tools/vision_imu_calibration/uno_q_phase2_app_lab_template/python/main.py').read_text()
     for option, value in (('"--pose-model"','"lightning"'), ('"--inference-threads"','"4"'), ('"--leg"','"left"')):
         assert contents.index(option) < contents.index(value, contents.index(option))
-    assert '"--final-pose-lock"' in contents
+    assert '"--final-pose-lock"' not in contents

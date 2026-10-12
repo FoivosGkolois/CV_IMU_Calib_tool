@@ -41,7 +41,6 @@ def run_vision_imu() -> None:
             "4",
             "--leg",
             "left",
-            "--final-pose-lock",
             "--imu-transport",
             "uno-q-bridge",
             "--host",

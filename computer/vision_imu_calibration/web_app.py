@@ -198,7 +198,20 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
       <div class="control-row"><label class="control-head" for="legSide">Tracked leg</label><select id="legSide"><option value="auto">Auto</option><option value="left">Left</option><option value="right">Right</option></select><div class="control-help"><b>Auto:</b> highest-confidence leg. <b>Left/Right:</b> locks the corrected user-facing side.</div></div>
       <div class="control-row"><label class="control-head" for="frameRotation">Frame rotation</label><select id="frameRotation"><option value="counterclockwise_90" selected>90° counter-clockwise</option><option value="none">0°</option><option value="clockwise_90">90° clockwise</option><option value="rotate_180">180°</option></select><div class="control-help">Default for the current portrait camera mounting.</div></div>
       <button id="applyCameraSetup" class="primary" onclick="applyCameraSetup()">Apply leg and rotation</button>
-      <div id="tuningMessage" class="note">Pose filter settings are fixed for the selected configuration.</div>
+      <div id="tuningMessage" class="note">Choose Left or Right for consistent single-leg tracking; Auto can switch legs.</div>
+      <details id="visionTunePanel" class="metric">
+        <summary><span class="control-head">Vision Tune · pose filters</span></summary>
+        <div class="controls" style="margin-top:12px">
+          <div class="control-row"><label class="control-head" for="confidenceThreshold">Acceptance confidence <output id="confidenceValue">0.29</output></label><input id="confidenceThreshold" type="range" min="0.05" max="0.99" step="any" value="0.29"><div class="control-help">Higher values reject uncertain landmarks, but may lose tracking.</div></div>
+          <div class="control-row"><label class="control-head" for="landmarkSmoothing">Landmark smoothing <output id="landmarkValue">0.30</output></label><input id="landmarkSmoothing" type="range" min="0" max="0.95" step="any" value="0.30"></div>
+          <div class="control-row"><label class="control-head" for="angleSmoothing">Angle smoothing <output id="angleValue">0.70</output></label><input id="angleSmoothing" type="range" min="0" max="0.95" step="any" value="0.70"></div>
+          <div class="control-row"><label class="control-head" for="segmentLength">Minimum visible segment <output id="segmentValue">0.025</output></label><input id="segmentLength" type="range" min="0.005" max="0.200" step="any" value="0.025"></div>
+          <div class="control-row"><label class="control-head" for="angleJump">Maximum angle jump <output id="jumpValue">45°</output></label><input id="angleJump" type="range" min="5" max="180" step="any" value="45"></div>
+          <button id="applyPoseSettings" class="primary" onclick="applyPoseSettings()">Apply Vision Tune</button>
+          <button id="savePosePreset" class="secondary" onclick="savePosePreset()">Save as startup preset</button>
+          <div id="poseTuningMessage" class="note">Changes apply only after pressing Apply. Saving the preset is optional. Changing pose settings invalidates prior calibration.</div>
+        </div>
+      </details>
     </div>
   </details>
 
@@ -258,8 +271,8 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
   <details class="card" data-focus-panel>
     <summary><span class="label">Advanced / Diagnostics</span></summary>
     <div class="step-content">
-      <div class="label">Pose filters · selected configuration</div>
-      <div class="note">Fixed for this UNO Q release: confidence 0.29 · landmark smoothing 0.30 · angle smoothing 0.70 · minimum segment 0.025 · maximum jump 45°.</div>
+      <div class="label">Pose filters</div>
+      <div class="note">Adjust Vision Tune in Camera Setup before calibration. Apply changes live; Save persists the startup preset.</div>
       <hr><div class="label">General recording</div><div id="generalRecordingStatus" class="value small">IDLE</div><div class="button-grid"><button id="startGeneralRecording" class="record" onclick="recordStart(false)">Start general recording</button><button id="stopGeneralRecording" class="stop" onclick="recordStop()">Stop recording</button></div>
       <div class="label">Raw IMU source</div><div id="imuState" class="value small">DISCONNECTED</div>
       <div id="imuSerialControls"><div class="inline-grid"><select id="imuPort"><option value="">Select COM port</option></select><button class="secondary" onclick="refreshImuPorts()">Refresh</button></div><div class="button-grid"><button id="imuConnect" class="primary" onclick="connectImu()">Connect</button><button id="imuDisconnect" class="stop" onclick="disconnectImu()">Disconnect</button></div></div>
@@ -276,6 +289,23 @@ footer { max-width:none; margin:0; padding:0 12px 12px; color:#73849c; font-size
 const legSide=document.getElementById('legSide');
 const frameRotation=document.getElementById('frameRotation');
 const tuningMessage=document.getElementById('tuningMessage');
+const poseTuningMessage=document.getElementById('poseTuningMessage');
+const applyPoseButton=document.getElementById('applyPoseSettings');
+const savePoseButton=document.getElementById('savePosePreset');
+const poseSliders=[
+  {key:'confidence_threshold',input:document.getElementById('confidenceThreshold'),output:document.getElementById('confidenceValue'),digits:2},
+  {key:'landmark_smoothing',input:document.getElementById('landmarkSmoothing'),output:document.getElementById('landmarkValue'),digits:2},
+  {key:'angle_smoothing',input:document.getElementById('angleSmoothing'),output:document.getElementById('angleValue'),digits:2},
+  {key:'min_segment_length',input:document.getElementById('segmentLength'),output:document.getElementById('segmentValue'),digits:3},
+  {key:'max_angle_jump_deg',input:document.getElementById('angleJump'),output:document.getElementById('jumpValue'),digits:0,suffix:'°'},
+];
+let posePresetLocked=false;
+let poseRequestBusy=false;
+for(const field of poseSliders){
+  field.input.addEventListener('input',()=>{
+    field.output.textContent=String(Number(field.input.value))+(field.suffix||'');
+  });
+}
 const imuReadySummary=document.getElementById('imuReadySummary');
 const cameraSetupStepStatus=document.getElementById('cameraSetupStepStatus');
 const referenceStepStatus=document.getElementById('referenceStepStatus');
@@ -380,13 +410,62 @@ function loadTuning(t){
   if(!t) return;
   if(t.leg_side!==undefined) legSide.value=t.leg_side;
   if(t.frame_rotation!==undefined) frameRotation.value=t.frame_rotation;
+  for(const field of poseSliders){
+    if(t[field.key]===undefined) continue;
+    field.input.value=String(t[field.key]);
+    field.input.dispatchEvent(new Event('input'));
+  }
+}
+function setPosePresetLock(locked){
+  if(posePresetLocked===locked) return;
+  posePresetLocked=locked;
+  for(const field of poseSliders) field.input.disabled=locked;
+  applyPoseButton.disabled=locked;
+  savePoseButton.disabled=locked;
+  poseTuningMessage.textContent=locked
+    ? 'Final UNO Q pose lock is active. Vision Tune is read-only in this launch mode.'
+    : 'Vision Tune is editable. Apply before calibration; Save makes it the startup preset.';
+}
+function visionTunePayload(){
+  return Object.fromEntries(poseSliders.map(field=>[field.key,Number(field.input.value)]));
+}
+async function applyPoseSettings(){
+  if(posePresetLocked||poseRequestBusy) return;
+  poseRequestBusy=true;
+  applyPoseButton.disabled=true;
+  savePoseButton.disabled=true;
+  try{
+    const r=await fetch('/api/tuning',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(visionTunePayload())});
+    const body=await r.json();
+    if(!r.ok) throw new Error(body.error||'request rejected');
+    loadTuning(body);
+    poseTuningMessage.textContent='Vision Tune applied. Previous calibration setup is invalid if values changed.';
+  }catch(e){poseTuningMessage.textContent='Vision Tune not applied: '+e.message;}
+  finally{poseRequestBusy=false;applyPoseButton.disabled=posePresetLocked;savePoseButton.disabled=posePresetLocked;}
+}
+async function savePosePreset(){
+  if(posePresetLocked||poseRequestBusy) return;
+  poseRequestBusy=true;
+  applyPoseButton.disabled=true;
+  savePoseButton.disabled=true;
+  try{
+    const payload=visionTunePayload();
+    const r=await fetch('/api/tuning/preset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    const body=await r.json();
+    if(!r.ok) throw new Error(body.error||'request rejected');
+    loadTuning(payload);
+    poseTuningMessage.textContent='Vision Tune applied and saved for the next startup. Repeat calibration if values changed.';
+  }catch(e){poseTuningMessage.textContent='Preset not saved: '+e.message;}
+  finally{poseRequestBusy=false;applyPoseButton.disabled=posePresetLocked;savePoseButton.disabled=posePresetLocked;}
 }
 async function applyCameraSetup(){
   const payload={leg_side:legSide.value,frame_rotation:frameRotation.value};
-  const r=await fetch('/api/tuning',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-  const body=await r.json();
-  tuningMessage.textContent=r.ok?'Tracked leg and frame rotation applied. Fixed pose-filter settings were preserved.':('Camera setup rejected: '+(body.error||'unknown error'));
-  if(r.ok) loadTuning(body);
+  try{
+    const r=await fetch('/api/tuning',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    const body=await r.json();
+    tuningMessage.textContent=r.ok?'Tracked leg and frame rotation applied. Vision Tune values unchanged.':('Camera setup rejected: '+(body.error||'unknown error'));
+    if(r.ok) loadTuning(body);
+  }catch(e){tuningMessage.textContent='Camera setup not applied: '+e.message;}
 }
 async function refreshImuPorts(){
   const selected=imuPort.value;
@@ -763,6 +842,7 @@ async function refresh(){
     if(rec.error) recordingPath.textContent='Recorder error: '+rec.error;
     resultsStepStatus.textContent=(cal.recommendation_url||rec.download_url||cal.heldout_validation_url)?'READY':'IDLE';
     if(!window.tuningLoaded && s.tuning){ loadTuning(s.tuning); window.tuningLoaded=true; }
+    setPosePresetLock(Boolean((s.pose_preset||{}).locked));
   } catch(e) { runtime.textContent='UI connection error: '+e; }
 }
 setInterval(refresh,350); setInterval(refreshHistory,700); refresh(); refreshHistory(); resizeVideoShell();
